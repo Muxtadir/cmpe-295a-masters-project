@@ -15,11 +15,17 @@ This repository contains the codebase, documentation, and meeting logs related t
 ## 📁 Repository Structure  
 
 A brief view of how this repository is organized:
-
-
-
-
-
+/ (root)
+│
+├── meetings/ # Weekly team and advisor meeting logs
+├── backend/ # FastAPI backend services
+├── frontend/ # React dashboard UI
+├── data/ # Datasets and preprocessing scripts
+├── docs/ # Project documentation (if any)
+├── scripts/ # Utility & evaluation scripts
+├── .gitignore
+├── README.md
+└── requirements.txt # Project dependencies
 
 
 ---
