@@ -30,14 +30,80 @@ A brief view of how this repository is organized:
 
 ---
 
-## 🗂 Meeting Logs  
 
-All official project meeting notes are stored in the `meetings/` folder. These logs:
+---
 
-- Track weekly team-only meetings and periodic advisor updates.
-- Include agendas, decisions, action items with ownership, and next steps.
-- Provide evidence of consistent project management cadence.
+## 🗂 Meeting Logs
 
-**Meeting logs link:**  
-➡️ https://github.com/Crimsonbeetle/cmpe-295a-masters-project/tree/main/meetings  
+All official project meeting notes are maintained in the `/meetings/` folder.
+
+These logs:
+- Track weekly student team meetings (Mondays).
+- Track advisor meetings (Mondays, when scheduled).
+- Include agendas, decisions, blockers, and action items with ownership.
+
+Direct link to meeting folder:
+
+https://github.com/Crimsonbeetle/cmpe-295a-masters-project/tree/main/meetings
+
+---
+
+## 🚀 Core Features (In Progress)
+
+- 📈 Demand Forecasting Module (Prophet baseline, LSTM planned)
+- 📦 Inventory Agent (rule-based reorder logic)
+- 📊 Dashboard for stock alerts and forecast visualization
+- ☁️ AWS-based backend deployment (EC2, RDS, S3)
+- 📉 Performance metrics tracking (MAE, RMSE, stockout rate)
+
+---
+
+## 🧪 Testing & Evaluation (Planned)
+
+- Forecast accuracy validation using MAE and RMSE.
+- Inventory performance evaluation using stockout and overstock rates.
+- End-to-end pipeline validation:
+  
+  Sales Data → Forecast → Inventory Decision → Dashboard
+
+- System performance measurement (API latency and response time).
+
+---
+
+## 🛠 Technology Stack
+
+**Backend**
+- Python 3.11
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+
+**Machine Learning**
+- Prophet
+- PyTorch
+- Pandas / NumPy
+
+**Frontend**
+- React
+- Recharts
+
+**Infrastructure**
+- Docker
+- AWS EC2
+- AWS RDS
+- AWS S3
+- CloudWatch
+
+---
+---
+
+## 👥 Team Members  
+
+- **Sriram Lakumarapu**  
+- **Vignesh Jetty Ravi**  
+- **Abdul Muqtadir Mohammed**  
+
+### 🎓 Project Advisor  
+
+- **Prof. Chandrasekar Vuppalapati**
 
