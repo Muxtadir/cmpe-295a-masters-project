@@ -15,3 +15,23 @@ This repository contains the codebase, documentation, and meeting logs related t
 ## 📁 Repository Structure  
 
 A brief view of how this repository is organized:
+
+
+
+
+
+
+
+---
+
+## 🗂 Meeting Logs  
+
+All official project meeting notes are stored in the `meetings/` folder. These logs:
+
+- Track weekly team-only meetings and periodic advisor updates.
+- Include agendas, decisions, action items with ownership, and next steps.
+- Provide evidence of consistent project management cadence.
+
+**Meeting logs link:**  
+➡️ https://github.com/Crimsonbeetle/cmpe-295a-masters-project/tree/main/meetings  
+
