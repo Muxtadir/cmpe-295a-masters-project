@@ -1,0 +1,16 @@
+backend/.venv/
+backend/**/__pycache__/
+*.pyc
+frontend/node_modules/
+frontend/dist/
+.env
+backend/.env
+
+# Local / generated — do not push
+.DS_Store
+**/.DS_Store
+backend/dev.db
+*.db
+
+# Kaggle training extract — multi‑GB; obtain via scripts/load_kaggle_dataset.py or Kaggle
+backend/data/train.csv

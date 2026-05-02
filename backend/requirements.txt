@@ -1,0 +1,27 @@
+# API
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Data & validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+email-validator>=2.0.0
+
+# Database
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+
+# ML / forecasting
+numpy>=1.26.0
+pandas>=2.1.0
+prophet>=1.1.5
+torch>=2.1.0
+
+# Utilities
+python-dateutil>=2.8.2
+python-multipart>=0.0.6
+
+# Auth (use `bcrypt` directly; passlib is unmaintained and breaks on bcrypt 4.x)
+bcrypt>=4.1.0
+python-jose[cryptography]>=3.3.0
+slowapi>=0.1.9
