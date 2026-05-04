@@ -20,9 +20,17 @@ class EvaluationMetrics(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     mae: float = Field(description="Rolling-window MAE when n_windows>0; else 0.")
-    stockout_rate: float = Field(description="% of periods where demand > inventory_available (aligned daily).")
+    stockout_rate: float = Field(
+        description=(
+            "% of simulated days where actual demand exceeds on-hand inventory **before** that day's demand "
+            "(daily ledger with lead-time replenishment and agent orders)."
+        ),
+    )
     overstock_percentage: float = Field(
-        description="% of periods where inventory_available > demand (same timeline as stockout_rate).",
+        description=(
+            "% of simulated days where on-hand inventory **before** demand strictly exceeds demand "
+            "(same simulation timeline as stockout_rate)."
+        ),
     )
     decision_latency_seconds: float = Field(
         description="Wall seconds: latest decision.created_at − linked forecast.generated_at (capped).",

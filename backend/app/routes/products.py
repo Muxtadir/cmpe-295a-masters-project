@@ -25,7 +25,11 @@ def list_forecast_dimensions(
     ],
     db: Session = Depends(get_db),
 ) -> list[ForecastDimension]:
-    """Distinct SKU × store pairs with ``COUNT(DISTINCT sale_date)`` — ordered best-first for Prophet."""
+    """
+    Distinct ``(store_id, sku)`` = ``(store_nbr, item_nbr)`` pairs with ``COUNT(DISTINCT sale_date)``.
+
+    Grain is **store × SKU** daily demand (same as forecasting); no product-family aggregation.
+    """
     stmt = (
         select(
             SalesHistory.sku,

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer } from "../components/ChartContainer.jsx";
 import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector } from "../components/SKUSelector.jsx";
+import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
 import { getEvaluationWindowed, getForecastDimensions, getProducts } from "../services/api.js";
 import { pickBestForecastDimension } from "../utils/pickBestForecastDimension.js";
 
@@ -127,14 +127,16 @@ export function EvaluationPage() {
     <div>
       <h1 style={{ marginTop: 0 }}>Evaluation</h1>
       <p style={{ color: "#8b949e", maxWidth: 720, lineHeight: 1.5 }}>
-        Rolling-window backtest (Prophet) vs actual sales. MAE / RMSE / MAPE use date-aligned points. Stockout and
-        overstock share the same daily timeline: stockout when demand exceeds inventory available; overstock when
-        inventory available exceeds demand (current on-hand + on-order snapshot applied to each historical day).
+        Rolling-window backtest (Prophet) vs actual <strong>daily demand</strong> for the selected{" "}
+        <strong>store × SKU</strong> (Kaggle <code style={{ color: "#8b949e" }}>store_nbr</code> ×{" "}
+        <code style={{ color: "#8b949e" }}>item_nbr</code>), not product-family aggregates. MAE / RMSE / MAPE use
+        date-aligned points. Stockout / overstock use the same simulated daily ledger (inventory before demand vs
+        actual sales; lead-time replenishment).
       </p>
       <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", alignItems: "end", flexWrap: "wrap" }}>
         {dimensions.length > 0 && (
           <label style={{ color: "#8b949e", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            Store
+            {UI_LABEL_STORE_NBR}
             <select
               value={storeId}
               onChange={(e) => setStoreId(e.target.value)}
@@ -152,7 +154,7 @@ export function EvaluationPage() {
           </label>
         )}
         <div style={{ width: 260 }}>
-          <SKUSelector value={sku} skus={skus} onChange={setSku} label="Product family (SKU)" />
+          <SKUSelector value={sku} skus={skus} onChange={setSku} />
         </div>
         <label style={{ color: "#8b949e" }}>
           Window

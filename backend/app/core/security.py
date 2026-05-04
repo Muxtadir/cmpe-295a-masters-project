@@ -8,6 +8,8 @@ from jose import JWTError, jwt
 
 from app.config import get_settings
 
+PASSWORD_RESET_PURPOSE = "pwd_reset"
+
 
 def hash_password(plain: str) -> str:
     """
@@ -30,6 +32,29 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def create_password_reset_token(email_normalized: str) -> str:
+    """Short-lived JWT for POST /auth/reset-password (not valid as a session Bearer token)."""
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.password_reset_expire_minutes)
+    payload: dict[str, Any] = {
+        "sub": email_normalized.strip().lower(),
+        "exp": expire,
+        "purpose": PASSWORD_RESET_PURPOSE,
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_password_reset_email(token: str) -> str:
+    """Return normalized email from a reset JWT, or raise JWTError."""
+    data = decode_token(token)
+    if data.get("purpose") != PASSWORD_RESET_PURPOSE:
+        raise JWTError("Not a password reset token")
+    sub = data.get("sub")
+    if sub is None or not str(sub).strip():
+        raise JWTError("Missing subject")
+    return str(sub).strip().lower()
+
+
 def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
@@ -45,8 +70,11 @@ def decode_token(token: str) -> dict[str, Any]:
 
 
 def decode_token_sub(token: str) -> str | None:
+    """Bearer session tokens only — password-reset JWTs are rejected."""
     try:
         data = decode_token(token)
+        if data.get("purpose") == PASSWORD_RESET_PURPOSE:
+            return None
         sub = data.get("sub")
         return str(sub) if sub is not None else None
     except JWTError:

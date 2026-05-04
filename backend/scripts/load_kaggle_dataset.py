@@ -31,6 +31,9 @@ Default ``--max-rows`` is 1500000 (better temporal coverage than a short prefix)
 Aggregation is incremental in memory (key = date × store × item) to avoid holding a list of
 per-chunk frames. Rows are aggregated before insert at (date × store_id × sku).
 
+``items.csv`` (product family / category) is **not** loaded here: the pipeline and Prophet models use **SKU-level**
+``item_nbr`` only; families are never aggregated for forecasting.
+
 Post-load: logs top 20 (store_id, sku) by COUNT(DISTINCT sale_date) for Kaggle rows and for all sources.
 """
 

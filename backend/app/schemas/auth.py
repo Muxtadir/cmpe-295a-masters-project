@@ -1,6 +1,29 @@
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, Field
 
 from app.models.enums import UserRole
+
+
+def _normalize_auth_email(value: str) -> str:
+    """
+    Login/register identifier shaped like an email.
+
+    ``EmailStr`` rejects several dev-friendly domains (e.g. ``*.local``); we only require
+    ``local@domain`` so internal / demo addresses work.
+    """
+    s = str(value).strip().lower()
+    if len(s) < 3 or len(s) > 255:
+        raise ValueError("Email must be between 3 and 255 characters")
+    if s.count("@") != 1:
+        raise ValueError("Invalid email format")
+    local, domain = s.split("@", 1)
+    if not local or not domain:
+        raise ValueError("Invalid email format")
+    return s
+
+
+AuthEmail = Annotated[str, AfterValidator(_normalize_auth_email)]
 
 
 class TokenResponse(BaseModel):
@@ -10,12 +33,12 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: AuthEmail
     password: str = Field(..., min_length=1)
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: AuthEmail
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str | None = None
     role: UserRole = UserRole.STORE_MANAGER
@@ -36,3 +59,24 @@ class RegisterInfoResponse(BaseModel):
 
     bootstrap_open: bool
     user_count: int
+
+
+class ChangePasswordRequest(BaseModel):
+    """Authenticated user verifies current password before setting a new one."""
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: AuthEmail
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    reset_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)

@@ -36,7 +36,15 @@ export function ProductsPage() {
       <h1 style={{ marginTop: 0 }}>Products</h1>
       <DataTable
         columns={[
-          { key: "sku", label: "SKU", render: (r) => <Link style={{ color: "#58a6ff" }} to={`/products/${r.sku}`}>{r.sku}</Link> },
+          {
+            key: "sku",
+            label: "SKU (item_nbr)",
+            render: (r) => (
+              <Link style={{ color: "#58a6ff" }} to={`/products/${r.sku}`}>
+                {r.sku}
+              </Link>
+            ),
+          },
           { key: "sales_points", label: "Sales points" },
           { key: "latest_sale_date", label: "Latest sale date" },
         ]}

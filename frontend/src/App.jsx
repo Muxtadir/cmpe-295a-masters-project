@@ -20,6 +20,7 @@ export default function App() {
 
   const items = [
     { to: "/", label: "Dashboard", show: true },
+    { to: "/change-password", label: "Change password", show: true },
     { to: "/products", label: "Products", show: true },
     { to: "/sales", label: "Sales", show: true },
     { to: "/agent-logs", label: "Agent Logs", show: true },

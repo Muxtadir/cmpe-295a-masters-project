@@ -112,14 +112,15 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(
     async (email, password, remember) => {
-      const res = await apiLogin({ email, password });
+      const emailNorm = String(email).trim().toLowerCase();
+      const res = await apiLogin({ email: emailNorm, password });
       applyToken(res.access_token, remember);
       client.defaults.headers.common.Authorization = `Bearer ${res.access_token}`;
       const decodedRole = decodeJwtRole(res.access_token);
       if (decodedRole) {
         setUser((prev) => ({
           id: prev?.id ?? 0,
-          email: prev?.email ?? email.trim(),
+          email: prev?.email ?? emailNorm,
           full_name: prev?.full_name ?? null,
           role: decodedRole,
           is_active: prev?.is_active ?? true,

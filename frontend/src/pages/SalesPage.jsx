@@ -32,8 +32,18 @@ export function SalesPage() {
     <div>
       <h1 style={{ marginTop: 0 }}>Sales Management</h1>
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
-        <input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="Filter SKU" style={inputStyle} />
-        <input value={storeId} onChange={(e) => setStoreId(e.target.value)} placeholder="Filter Store" style={inputStyle} />
+        <input
+          value={sku}
+          onChange={(e) => setSku(e.target.value)}
+          placeholder="Filter SKU (item_nbr)"
+          style={inputStyle}
+        />
+        <input
+          value={storeId}
+          onChange={(e) => setStoreId(e.target.value)}
+          placeholder="Filter store (store_nbr)"
+          style={inputStyle}
+        />
         <button onClick={load} style={btnStyle}>Apply</button>
       </div>
       <ChartContainer title="Aggregated Daily Demand">
@@ -51,10 +61,20 @@ export function SalesPage() {
         <>
           <h3 style={{ marginTop: "1rem" }}>Add manual sales entry</h3>
           <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-            <input style={inputStyle} placeholder="SKU" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+            <input
+              style={inputStyle}
+              placeholder="SKU (item_nbr)"
+              value={form.sku}
+              onChange={(e) => setForm({ ...form, sku: e.target.value })}
+            />
             <input style={inputStyle} type="date" value={form.sale_date} onChange={(e) => setForm({ ...form, sale_date: e.target.value })} />
             <input style={inputStyle} type="number" min="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
-            <input style={inputStyle} placeholder="Store ID (optional)" value={form.store_id} onChange={(e) => setForm({ ...form, store_id: e.target.value })} />
+            <input
+              style={inputStyle}
+              placeholder="store_id / store_nbr (optional)"
+              value={form.store_id}
+              onChange={(e) => setForm({ ...form, store_id: e.target.value })}
+            />
             <button
               style={btnStyle}
               onClick={async () => {
@@ -125,8 +145,8 @@ export function SalesPage() {
         rows={data.records}
         columns={[
           { key: "sale_date", label: "Date" },
-          { key: "sku", label: "SKU" },
-          { key: "store_id", label: "Store" },
+          { key: "sku", label: "SKU (item_nbr)" },
+          { key: "store_id", label: "Store (store_nbr)" },
           { key: "quantity", label: "Quantity" },
           { key: "currency", label: "Currency" },
         ]}

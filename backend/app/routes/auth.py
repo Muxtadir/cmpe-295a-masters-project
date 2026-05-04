@@ -4,20 +4,42 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from jose import JWTError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.config import get_settings
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    decode_password_reset_email,
+    hash_password,
+    verify_password,
+)
 from app.database import get_db
 from app.deps.auth import get_current_active_user, get_optional_user, normalize_role
 from app.models.enums import UserRole
 from app.models.user import User
 from app.limiter import limiter
-from app.schemas.auth import LoginRequest, RegisterRequest, RegisterInfoResponse, TokenResponse, UserRead
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    LoginRequest,
+    RegisterRequest,
+    RegisterInfoResponse,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserRead,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
+
+
+def _normalize_email(email: str) -> str:
+    return str(email).strip().lower()
 
 
 def _count_users(db: Session) -> int:
@@ -107,7 +129,8 @@ def register(
             if payload.role == UserRole.ADMIN and actor_role != UserRole.ADMIN:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot assign admin role")
 
-        existing = db.execute(select(User).where(User.email == str(payload.email))).scalar_one_or_none()
+        email_norm = _normalize_email(payload.email)
+        existing = db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
@@ -124,7 +147,7 @@ def register(
             ) from e
 
         user = User(
-            email=str(payload.email),
+            email=email_norm,
             full_name=payload.full_name,
             hashed_password=hashed_password,
             role=role,
@@ -187,15 +210,14 @@ def login(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     """Login is rate-limited to reduce brute-force risk."""
-    user = db.execute(select(User).where(User.email == str(payload.email))).scalar_one_or_none()
+    email_norm = _normalize_email(payload.email)
+    user = db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
     if user is None or user.hashed_password is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
-
-    from app.config import get_settings
 
     settings = get_settings()
     token = create_access_token(
@@ -208,6 +230,73 @@ def login(
     )
 
 
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+@limiter.limit("20/hour")
+def forgot_password(
+    request: Request,
+    payload: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+) -> ForgotPasswordResponse:
+    """
+    Request a password reset. With ``expose_password_reset_token`` (dev), the API returns a short-lived JWT
+    to paste on ``/reset-password``. In production, set that flag false and deliver tokens by email instead.
+    """
+    settings = get_settings()
+    email_norm = _normalize_email(payload.email)
+    user = db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
+    generic = "If this email is registered, you can complete password reset using the instructions below."
+    if user is None:
+        return ForgotPasswordResponse(message=generic)
+    if settings.expose_password_reset_token:
+        reset_token = create_password_reset_token(email_norm)
+        return ForgotPasswordResponse(
+            message=generic + " Copy the reset token if needed, then choose a new password on the next screen.",
+            reset_token=reset_token,
+        )
+    return ForgotPasswordResponse(
+        message="If this email is registered, you will receive reset instructions shortly. "
+        "If nothing arrives, contact an administrator.",
+    )
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/hour")
+def reset_password_with_token(
+    request: Request,
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> None:
+    try:
+        email_norm = decode_password_reset_email(payload.token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token. Request a new link from Forgot password.",
+        ) from None
+
+    user = db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token. Request a new link from Forgot password.",
+        )
+
+    try:
+        user.hashed_password = hash_password(payload.new_password)
+        db.add(user)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("reset-password: DB error for email=%s", email_norm)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update password.",
+        ) from None
+
+
 @router.get("/me", response_model=UserRead)
 def me(current: Annotated[User, Depends(get_current_active_user)]) -> UserRead:
     return UserRead(
@@ -217,3 +306,46 @@ def me(current: Annotated[User, Depends(get_current_active_user)]) -> UserRead:
         role=normalize_role(current.role),
         is_active=current.is_active,
     )
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    payload: ChangePasswordRequest,
+    current: Annotated[User, Depends(get_current_active_user)],
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Update password for the signed-in account.
+    Wrong current password returns 400 so clients do not treat it as an expired session (401).
+
+    Reload ``User`` by primary key on this route's ``Session`` before mutating — the ORM instance from
+    ``Depends(get_current_active_user)`` may not always be the same session-bound row under uvicorn
+    reload/workers, which previously caused failed commits (HTTP 500).
+    """
+    row = db.execute(select(User).where(User.id == current.id)).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if row.hashed_password is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account has no password set; contact an administrator.",
+        )
+    if not verify_password(payload.current_password, row.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if verify_password(payload.new_password, row.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must differ from the current password")
+
+    try:
+        row.hashed_password = hash_password(payload.new_password)
+        db.commit()
+    except ValueError as e:
+        logger.warning("Change password: hashing rejected: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Database error updating password for user id=%s", getattr(row, "id", None))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update password.",
+        ) from None

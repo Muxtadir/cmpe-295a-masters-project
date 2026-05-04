@@ -28,7 +28,13 @@ export function ProductDetailPage() {
   const inv = detail?.inventory;
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>Product Detail — {sku}</h1>
+      <h1 style={{ marginTop: 0 }}>SKU (Item ID) — {sku}</h1>
+      <p style={{ color: "#8b949e", fontSize: "0.9rem", maxWidth: 640, lineHeight: 1.5 }}>
+        Kaggle <code style={{ color: "#8b949e" }}>item_nbr</code> as SKU. Forecasts in this app are trained and served at{" "}
+        <strong>store × SKU</strong> granularity (pass <code style={{ color: "#8b949e" }}>store_id</code> query param to
+        the API for store-specific posture); product categories in <code style={{ color: "#8b949e" }}>items.csv</code> are
+        not used by the forecasting model.
+      </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem" }}>
         <MetricCard label="On hand" value={inv?.quantity_on_hand ?? 0} />
         <MetricCard label="On order" value={inv?.quantity_on_order ?? 0} />

@@ -1,7 +1,8 @@
 from typing import Annotated
+from types import SimpleNamespace
 
 import logging
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,14 +19,17 @@ from app.schemas.forecast import ForecastPoint
 from app.services.evaluation import (
     compute_forecast_to_decision_latency_seconds,
     compute_mae,
-    log_inventory_period_debug,
-    period_overstock_rate_pct,
-    period_stockout_rate_pct,
     relative_stockout_improvement_percent,
 )
 from app.services.backtesting import rolling_backtest
 from app.services.forecast_queries import select_latest_forecast_result
-from app.services.inventory_alignment import aggregate_inventory_position_and_reorder_point
+from app.services.inventory_alignment import (
+    aggregate_inventory_policy_params,
+    baseline_order_up_to_level,
+    compute_initial_on_hand_for_simulation,
+    decision_quantities_per_sale_day,
+    simulate_daily_inventory_metrics,
+)
 from app.services.sales_timeseries import daily_sales_dataframe_from_rows
 
 router = APIRouter()
@@ -73,12 +77,22 @@ def _degraded_evaluation_response(
 
 @router.get("/evaluation/{sku}", response_model=EvaluationResponse)
 def get_evaluation_metrics(
-    sku: str,
+    sku: Annotated[
+        str,
+        Path(
+            max_length=128,
+            description="Kaggle item_nbr as string; metrics use daily demand for this SKU (not product family).",
+        ),
+    ],
     current: Annotated[
         User,
         Depends(require_store_manager_or_admin),
     ],
-    store_id: str | None = Query(default=None, max_length=64, description="Filter sales/forecast to a store (Kaggle store_nbr)."),
+    store_id: str | None = Query(
+        default=None,
+        max_length=64,
+        description="Kaggle store_nbr as string; evaluation uses sales/forecast for this store × SKU pair.",
+    ),
     window_days: int = Query(default=7, ge=1, le=60),
     train_window: int = Query(default=30, ge=30, le=365),
     db: Session = Depends(get_db),
@@ -150,9 +164,19 @@ def _evaluation_metrics_impl(
     else:
         inv_stmt = inv_stmt.where(InventoryRecord.store_id.is_(None))
     inv_rows = db.execute(inv_stmt).scalars().all()
-    inv_snap, baseline_reorder_point = aggregate_inventory_position_and_reorder_point(list(inv_rows))
-    inv_avail_observed = [inv_snap] * len(actual)
-    baseline_inv_proxy = [baseline_reorder_point] * len(actual)
+    policy = aggregate_inventory_policy_params(list(inv_rows))
+    inv_snap = policy["snap"]
+    baseline_reorder_point = policy["reorder_point_max"]
+    baseline_order_up_to_S = baseline_order_up_to_level(policy)
+    lead_days_sim = max(1, int(round(policy["lead_time_days"])))
+    initial_sim_inv = compute_initial_on_hand_for_simulation(policy, actual)
+
+    sales_day_objs = [SimpleNamespace(sale_date=d) for d in sales_df["ds"].tolist()] if not sales_df.empty else []
+    orders_agent = decision_quantities_per_sale_day(sales_day_objs, decision_rows)
+    if len(orders_agent) < len(actual):
+        orders_agent = orders_agent + [0.0] * (len(actual) - len(orders_agent))
+    elif len(orders_agent) > len(actual):
+        orders_agent = orders_agent[: len(actual)]
 
     # Rolling backtesting metrics (Prophet, walk-forward): baseline vs optional holiday regressor.
     _bt_exclude = frozenset({"series_points", "use_holiday_regressor"})
@@ -219,26 +243,24 @@ def _evaluation_metrics_impl(
             misaligned_mae,
         )
 
-    # Period metrics (same index = same sale day): stockout if demand > inv_avail; overstock if inv_avail > demand.
-    # Observed inventory uses current snapshot (on_hand+on_order) as a constant proxy across history.
-    stockout_rate = period_stockout_rate_pct(actual, inv_avail_observed)
-    overstock_pct = period_overstock_rate_pct(actual, inv_avail_observed)
-    log_inventory_period_debug(
-        sku,
+    # Period metrics: daily simulation (inventory before demand vs actual demand); baseline is order-up-to policy.
+    stockout_rate, overstock_pct = simulate_daily_inventory_metrics(
         actual,
-        inv_avail_observed,
-        label="observed_inv_snapshot",
+        lead_time_days=lead_days_sim,
+        initial_on_hand=initial_sim_inv,
+        sku=sku,
+        track_label="agent_orders_pipeline",
+        orders_fixed=orders_agent,
     )
     decision_latency = compute_forecast_to_decision_latency_seconds(db, sku, store_id=store_id)
 
-    # Baseline: static reorder point as proxy for target inventory position each period.
-    baseline_stockout_rate = period_stockout_rate_pct(actual, baseline_inv_proxy)
-    baseline_overstock_rate = period_overstock_rate_pct(actual, baseline_inv_proxy)
-    log_inventory_period_debug(
-        sku,
+    baseline_stockout_rate, baseline_overstock_rate = simulate_daily_inventory_metrics(
         actual,
-        baseline_inv_proxy,
-        label="baseline_static_reorder_point",
+        lead_time_days=lead_days_sim,
+        initial_on_hand=initial_sim_inv,
+        sku=sku,
+        track_label="baseline_order_up_to",
+        order_up_to_target=baseline_order_up_to_S,
     )
     agentic_stockout_rate = stockout_rate
     improvement_percent = relative_stockout_improvement_percent(
@@ -246,11 +268,14 @@ def _evaluation_metrics_impl(
         agentic_stockout_rate,
     )
     logger.info(
-        "Evaluation stockout sku=%s inv_snap=%.2f rop=%.2f observed_sr=%.4f observed_or=%.4f "
-        "baseline_sr=%.4f baseline_or=%.4f improvement_pct=%.4f decisions=%s",
+        "Evaluation stockout sku=%s inv_snap=%.2f rop=%.2f baseline_S=%.2f lead=%s initial_sim=%.2f "
+        "agent_sr=%.4f agent_or=%.4f baseline_sr=%.4f baseline_or=%.4f improvement_pct=%.4f decisions=%s",
         sku,
         inv_snap,
         baseline_reorder_point,
+        baseline_order_up_to_S,
+        lead_days_sim,
+        initial_sim_inv,
         stockout_rate,
         overstock_pct,
         baseline_stockout_rate,
@@ -351,6 +376,9 @@ def _evaluation_metrics_impl(
                 "baseline_overstock_rate_pct": baseline_overstock_rate,
                 "inventory_snapshot_units": inv_snap,
                 "baseline_reorder_point_units": baseline_reorder_point,
+                "baseline_order_up_to_units": baseline_order_up_to_S,
+                "inventory_sim_initial_on_hand": initial_sim_inv,
+                "inventory_sim_lead_time_days": lead_days_sim,
                 "rolling_mae_baseline": float(backtest.get("mae", 0.0)),
                 "rolling_mae_holiday": float(backtest_holiday.get("mae", 0.0)) if backtest_holiday else None,
             },

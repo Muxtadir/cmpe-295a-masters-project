@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { ChartContainer } from "../components/ChartContainer.jsx";
 import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector } from "../components/SKUSelector.jsx";
+import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
   getBusinessDashboard,
@@ -63,7 +63,7 @@ export function DashboardPage() {
   const roleKey = role ?? "";
   const canRunInventory = roleKey === "admin" || roleKey === "store_manager";
 
-  /** Kaggle: distinct (store, family) rows; fallback: legacy catalog from GET /products. */
+  /** Kaggle: distinct (store_id, sku) = (store_nbr, item_nbr); fallback: legacy catalog from GET /products. */
   const [dimensions, setDimensions] = useState([]);
   const [storeId, setStoreId] = useState("");
   const [sku, setSku] = useState("");
@@ -250,7 +250,7 @@ export function DashboardPage() {
       { label: "Horizon (d)", value: String(forecast.horizon_days) },
     ];
     if (forecast.store_id != null && forecast.store_id !== "") {
-      rows.push({ label: "Store", value: String(forecast.store_id) });
+      rows.push({ label: "Store (store_nbr)", value: String(forecast.store_id) });
     }
     return rows;
   }, [forecast]);
@@ -319,13 +319,15 @@ export function DashboardPage() {
       <h1 style={{ fontSize: "1.5rem", marginTop: 0 }}>Operations overview</h1>
       <p style={{ color: "#8b949e", maxWidth: 720 }}>
         Unified monitoring for forecast quality, business impact estimates, inventory posture, and supply-adjusted
-        recommendations.
+        recommendations. Demand forecasts use <strong>daily sales per store × SKU</strong> (Kaggle{" "}
+        <code style={{ color: "#8b949e" }}>store_nbr</code> × <code style={{ color: "#8b949e" }}>item_nbr</code>),
+        not product-family rollups (<code style={{ color: "#8b949e" }}>items.csv</code> families are unused in the model).
       </p>
 
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem", maxWidth: 560 }}>
         {dimensions.length > 0 && (
           <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", color: "#8b949e", fontSize: "0.85rem" }}>
-            Store
+            {UI_LABEL_STORE_NBR}
             <select
               value={storeId}
               onChange={(e) => setStoreId(e.target.value)}
@@ -350,7 +352,7 @@ export function DashboardPage() {
           </label>
         )}
         <div style={{ flex: "1 1 220px", maxWidth: 280 }}>
-          <SKUSelector skus={skus} value={sku} onChange={setSku} label="Product family (SKU)" />
+          <SKUSelector skus={skus} value={sku} onChange={setSku} />
         </div>
       </div>
       {metrics.length > 0 && (

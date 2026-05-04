@@ -26,7 +26,7 @@ MIN_PROPHET_HISTORY_DAYS = 30
 
 
 class DemandForecastAgent:
-    """Structured agent entrypoint for demand forecasting (Prophet / LSTM)."""
+    """Demand forecasting at daily **store × SKU** grain (Kaggle ``store_nbr`` → ``store_id``, ``item_nbr`` → ``sku``)."""
 
     def __init__(self, db: Session) -> None:
         self._db = db

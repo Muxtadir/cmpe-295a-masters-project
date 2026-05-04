@@ -2,7 +2,7 @@ import logging
 import math
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.agents.demand_forecast_agent import DemandForecastAgent
@@ -50,12 +50,25 @@ def _prediction_dicts_to_points(raw: list[dict]) -> list[ForecastPoint]:
 
 @router.get("/forecast/{sku}", response_model=ForecastResponse)
 def get_forecast(
-    sku: str,
+    sku: Annotated[
+        str,
+        Path(
+            max_length=128,
+            description="Kaggle item_nbr as string (SKU-level key; not product family).",
+        ),
+    ],
     current: Annotated[User, Depends(require_store_manager_or_admin)],
     db: Session = Depends(get_db),
     horizon_days: int | None = Query(default=None, ge=1, le=365),
     model: str | None = Query(default=None),
-    store_id: str | None = Query(default=None, max_length=64),
+    store_id: Annotated[
+        str | None,
+        Query(
+            default=None,
+            max_length=64,
+            description="Kaggle store_nbr as string. Forecast uses daily sales for this store × SKU only.",
+        ),
+    ] = None,
 ) -> ForecastResponse:
     settings = get_settings()
     h = horizon_days if horizon_days is not None else settings.default_forecast_horizon_days

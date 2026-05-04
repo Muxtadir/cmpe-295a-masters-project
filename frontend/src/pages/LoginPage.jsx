@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { PasswordInput } from "../components/PasswordInput.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const card = {
@@ -97,18 +98,19 @@ export function LoginPage() {
               disabled={submitting}
             />
           </label>
-          <label style={{ display: "block", color: "#8b949e", fontSize: "0.85rem" }}>
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              style={input}
-              disabled={submitting}
-            />
-          </label>
+          <PasswordInput
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            disabled={submitting}
+            autoComplete="current-password"
+            marginBottom="0.35rem"
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.85rem" }}>
+            <Link to="/forgot-password" style={{ color: "#58a6ff", fontSize: "0.85rem" }}>
+              Forgot password?
+            </Link>
+          </div>
           <label
             style={{
               display: "flex",

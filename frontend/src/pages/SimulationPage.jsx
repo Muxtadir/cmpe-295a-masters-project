@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { JSONViewer } from "../components/JSONViewer.jsx";
 import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector } from "../components/SKUSelector.jsx";
+import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getForecastDimensions, getProducts, postSimulateDisruption } from "../services/api.js";
 import { pickBestForecastDimension } from "../utils/pickBestForecastDimension.js";
@@ -89,7 +89,7 @@ export function SimulationPage() {
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", flexWrap: "wrap" }}>
         {dimensions.length > 0 && (
           <label style={{ color: "#8b949e", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            Store
+            {UI_LABEL_STORE_NBR}
             <select
               value={storeId}
               onChange={(e) => setStoreId(e.target.value)}
@@ -107,7 +107,7 @@ export function SimulationPage() {
           </label>
         )}
         <div style={{ width: 260 }}>
-          <SKUSelector skus={skus} value={sku} onChange={setSku} label="Product family (SKU)" />
+          <SKUSelector skus={skus} value={sku} onChange={setSku} />
         </div>
         <label style={{ color: "#8b949e" }}>
           Demand multiplier

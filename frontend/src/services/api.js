@@ -31,7 +31,9 @@ client.interceptors.response.use(
     const isAuthPublic =
       url.includes("/auth/login") ||
       url.includes("/auth/register") ||
-      url.includes("/auth/register-info");
+      url.includes("/auth/register-info") ||
+      url.includes("/auth/forgot-password") ||
+      url.includes("/auth/reset-password");
     if (err.response?.status === 401 && !isAuthPublic) {
       try {
         localStorage.removeItem("retail_ops_access_token");
@@ -42,7 +44,8 @@ client.interceptors.response.use(
       }
       delete client.defaults.headers.common.Authorization;
       const path = window.location.pathname || "";
-      if (!path.startsWith("/login") && !path.startsWith("/register")) {
+      const publicPrefix = ["/login", "/register", "/forgot-password", "/reset-password"];
+      if (!publicPrefix.some((p) => path.startsWith(p))) {
         window.location.href = "/login";
       }
     }
@@ -62,6 +65,19 @@ export async function login(body) {
   } catch (e) {
     throw authNetworkError(e, "Sign-in");
   }
+}
+
+export async function forgotPassword(body) {
+  try {
+    const { data } = await client.post("/auth/forgot-password", body, { timeout: AUTH_MS });
+    return data;
+  } catch (e) {
+    throw authNetworkError(e, "Forgot password");
+  }
+}
+
+export async function resetPassword(body) {
+  await client.post("/auth/reset-password", body, { timeout: AUTH_MS });
 }
 
 /** Pass `accessToken` when an admin creates accounts after bootstrap (Authorization header must be sent). */
@@ -107,6 +123,11 @@ export async function getMe() {
   } catch (e) {
     throw authNetworkError(e, "Session check");
   }
+}
+
+/** Signed-in user; sends Bearer token from axios defaults. */
+export async function changePassword(body) {
+  await client.post("/auth/change-password", body);
 }
 
 export async function listUsers() {
