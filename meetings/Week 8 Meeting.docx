@@ -1,0 +1,27 @@
+# Meeting Type: Advisor
+**Date:** 2026-04-07  
+**Mode:** Offline  
+**Attendees:** Prof. Chandrasekar Vuppalapati, Abdul Muqtadir, Vignesh, Sriram  
+
+## Agenda
+- Evaluation planning
+
+## Discussion Summary
+- Advisor suggested rolling-window evaluation
+
+## Accomplishments Since Last Meeting
+- Multi-agent workflow working
+
+## Decisions Made
+- Use MAE, RMSE, stockout rate
+
+## Blockers / Issues
+- Evaluation not implemented
+
+## Action Items
+- Implement backtesting – Vignesh
+- Log decisions – Abdul
+- Add evaluation UI – Sriram
+
+## Next Steps
+- Integrate evaluation module
