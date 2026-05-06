@@ -29,33 +29,32 @@
 ## Next Steps
 - Integrate forecasting with backend
 
-# Meeting Type: Advisor
-**Date:** 2026-03-17  
+# Meeting Type: Team
+**Date:** 2026-03-19  
 **Mode:** Offline  
-**Attendees:** Prof. Chandrasekar Vuppalapati, Abdul Muqtadir, Vignesh, Sriram  
+**Attendees:** Abdul Muqtadir, Vignesh, Sriram  
 
 ## Agenda
-- Review progress
-- Confirm forecasting approach
+- Progress sync
+- Integration planning
 
 ## Discussion Summary
-- Discussed Prophet as baseline model
-- Advisor emphasized evaluation metrics (MAE, RMSE)
+- Forecast model in progress
+- Backend APIs being developed
 
 ## Accomplishments Since Last Meeting
-- Dataset selected
-- Backend setup started
+- Prophet model partially implemented
 
 ## Decisions Made
-- Use Prophet for baseline forecasting
+- Use JSON for agent communication
 
 ## Blockers / Issues
-- Integration not started
+- Data preprocessing delays
 
 ## Action Items
-- Implement forecasting model – Vignesh
-- Continue backend APIs – Abdul
-- Start dashboard skeleton – Sriram
+- Complete Prophet model – Vignesh
+- Finish API endpoints – Abdul
+- Connect UI with APIs – Sriram
 
 ## Next Steps
-- Integrate forecasting with backend
+- Begin integration phase
