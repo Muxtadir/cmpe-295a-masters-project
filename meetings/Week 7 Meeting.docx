@@ -1,0 +1,28 @@
+# Meeting Type: Advisor
+**Date:** 2026-03-31  
+**Mode:** Offline  
+**Attendees:** Prof. Chandrasekar Vuppalapati, Abdul Muqtadir, Vignesh, Sriram  
+
+## Agenda
+- Multi-agent integration review
+
+## Discussion Summary
+- Discussed coordination between agents
+- Advisor emphasized explainability
+
+## Accomplishments Since Last Meeting
+- Inventory logic implemented
+
+## Decisions Made
+- Add explanation logs for decisions
+
+## Blockers / Issues
+- Supply agent pending
+
+## Action Items
+- Implement supply agent – Abdul
+- Continue evaluation setup – Vignesh
+- Improve dashboard – Sriram
+
+## Next Steps
+- Complete agent integration
