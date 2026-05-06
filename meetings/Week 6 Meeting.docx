@@ -1,0 +1,61 @@
+# Meeting Type: Advisor
+**Date:** 2026-03-17  
+**Mode:** Offline  
+**Attendees:** Prof. Chandrasekar Vuppalapati, Abdul Muqtadir, Vignesh, Sriram  
+
+## Agenda
+- Review progress
+- Confirm forecasting approach
+
+## Discussion Summary
+- Discussed Prophet as baseline model
+- Advisor emphasized evaluation metrics (MAE, RMSE)
+
+## Accomplishments Since Last Meeting
+- Dataset selected
+- Backend setup started
+
+## Decisions Made
+- Use Prophet for baseline forecasting
+
+## Blockers / Issues
+- Integration not started
+
+## Action Items
+- Implement forecasting model – Vignesh
+- Continue backend APIs – Abdul
+- Start dashboard skeleton – Sriram
+
+## Next Steps
+- Integrate forecasting with backend
+
+# Meeting Type: Advisor
+**Date:** 2026-03-17  
+**Mode:** Offline  
+**Attendees:** Prof. Chandrasekar Vuppalapati, Abdul Muqtadir, Vignesh, Sriram  
+
+## Agenda
+- Review progress
+- Confirm forecasting approach
+
+## Discussion Summary
+- Discussed Prophet as baseline model
+- Advisor emphasized evaluation metrics (MAE, RMSE)
+
+## Accomplishments Since Last Meeting
+- Dataset selected
+- Backend setup started
+
+## Decisions Made
+- Use Prophet for baseline forecasting
+
+## Blockers / Issues
+- Integration not started
+
+## Action Items
+- Implement forecasting model – Vignesh
+- Continue backend APIs – Abdul
+- Start dashboard skeleton – Sriram
+
+## Next Steps
+- Integrate forecasting with backend
