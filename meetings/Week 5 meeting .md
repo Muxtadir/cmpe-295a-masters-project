@@ -28,3 +28,33 @@
 
 ## Next Steps
 - Begin implementation of base components
+
+# Meeting Type: Team
+**Date:** 2026-03-12  
+**Mode:** Offline  
+**Attendees:** Abdul Muqtadir, Vignesh, Sriram  
+
+## Agenda
+- Divide responsibilities
+- Plan initial development
+
+## Discussion Summary
+- Roles assigned: Backend (Abdul), ML (Vignesh), Frontend (Sriram)
+- Discussed development phases
+
+## Accomplishments Since Last Meeting
+- Project roles defined
+
+## Decisions Made
+- Use FastAPI, React, PostgreSQL
+
+## Blockers / Issues
+- Dataset still pending
+
+## Action Items
+- Setup repo and structure – Abdul
+- Start data preprocessing – Vignesh
+- Design UI layout – Sriram
+
+## Next Steps
+- Prepare for backend and model setup
