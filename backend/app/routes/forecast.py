@@ -64,7 +64,6 @@ def get_forecast(
     store_id: Annotated[
         str | None,
         Query(
-            default=None,
             max_length=64,
             description="Kaggle store_nbr as string. Forecast uses daily sales for this store × SKU only.",
         ),

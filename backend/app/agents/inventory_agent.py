@@ -75,6 +75,26 @@ class InventoryAgent:
         position = int(record.quantity_on_hand + record.quantity_on_order)
 
         lead_demand = self._lead_time_demand(forecast_predictions, effective_lead)
+        demand_used_for_reorder = (
+            float(lead_demand) / float(effective_lead)
+            if effective_lead > 0
+            else 0.0
+        )
+        reorder_point_effective, max_stock_level_effective = self._effective_policy_levels(
+            record=record,
+            lead_time_days_effective=effective_lead,
+            demand_used_for_reorder=demand_used_for_reorder,
+            forecast_predictions=forecast_predictions,
+        )
+        logger.info(
+            "inventory_policy_recompute sku=%s lead_time_days_used_for_reorder=%s "
+            "demand_used_for_reorder=%.4f computed_reorder_point=%.4f computed_max_stock_level=%.4f",
+            record.sku,
+            effective_lead,
+            demand_used_for_reorder,
+            reorder_point_effective,
+            max_stock_level_effective,
+        )
         # position = quantity_on_hand + quantity_on_order; projected after lead-time demand consumed.
         projected_position = position - lead_demand
         logger.debug(
@@ -85,7 +105,11 @@ class InventoryAgent:
             projected_position,
         )
 
-        base_qty = self._min_max_order_qty(record, position)
+        base_qty = self._min_max_order_qty(
+            position=position,
+            reorder_point_effective=reorder_point_effective,
+            max_stock_level_effective=max_stock_level_effective,
+        )
         stockout_deficit = 0
         if forecast_predictions is not None and projected_position < record.safety_stock:
             stockout_deficit = int(record.safety_stock - projected_position)
@@ -113,6 +137,8 @@ class InventoryAgent:
             "quantity_on_order": int(record.quantity_on_order),
             "reorder_point": int(record.reorder_point),
             "max_stock_level": int(record.max_stock_level),
+            "reorder_point_effective": float(reorder_point_effective),
+            "max_stock_level_effective": float(max_stock_level_effective),
             "safety_stock": int(record.safety_stock),
             "lead_time_days_nominal": int(record.lead_time_days),
             "lead_time_days_effective": int(effective_lead),
@@ -123,6 +149,7 @@ class InventoryAgent:
             "supply_risk_score": float(supply_assessment.risk_score),
             "supply_factors": dict(supply_assessment.factors),
             "lead_time_demand_estimate": float(lead_demand),
+            "demand_used_for_reorder": float(demand_used_for_reorder),
             "projected_position_after_lead_time": float(projected_position),
             "base_order_qty_min_max": int(base_qty),
             "forecast_adjustment_units": int(stockout_deficit),
@@ -173,10 +200,45 @@ class InventoryAgent:
         )
         return row, explanation
 
-    def _min_max_order_qty(self, record: InventoryRecord, position: int) -> int:
-        if position > record.reorder_point:
+    def _min_max_order_qty(
+        self,
+        *,
+        position: int,
+        reorder_point_effective: float,
+        max_stock_level_effective: float,
+    ) -> int:
+        if float(position) > float(reorder_point_effective):
             return 0
-        return max(0, record.max_stock_level - position)
+        return max(0, int(round(float(max_stock_level_effective) - float(position))))
+
+    def _effective_policy_levels(
+        self,
+        *,
+        record: InventoryRecord,
+        lead_time_days_effective: int,
+        demand_used_for_reorder: float,
+        forecast_predictions: list[dict] | None,
+    ) -> tuple[float, float]:
+        """
+        Recompute policy thresholds from effective scenario inputs.
+
+        When forecast points are present, use:
+          reorder_point = demand_daily * lead_time_effective + safety_stock
+          max_stock_level = reorder_point + demand_daily * lead_time_effective
+
+        This ensures simulation overrides (lead time and demand multiplier) directly
+        impact min-max decisions.
+        """
+        # Keep nominal policy when no forecast exists; overlay cannot infer daily demand.
+        if not forecast_predictions:
+            return float(record.reorder_point), float(record.max_stock_level)
+
+        lead = max(1, int(lead_time_days_effective))
+        demand_daily = max(0.0, float(demand_used_for_reorder))
+        safety = float(record.safety_stock)
+        reorder = demand_daily * float(lead) + safety
+        max_level = reorder + demand_daily * float(lead)
+        return float(reorder), float(max_level)
 
     def _lead_time_demand(
         self,

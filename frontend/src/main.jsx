@@ -9,6 +9,7 @@ import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { EvaluationPage } from "./pages/EvaluationPage.jsx";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
+import { MyAccountPage } from "./pages/MyAccountPage.jsx";
 import { ProductDetailPage } from "./pages/ProductDetailPage.jsx";
 import { ProductsPage } from "./pages/ProductsPage.jsx";
 import { RegisterPage } from "./pages/RegisterPage.jsx";
@@ -44,6 +45,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="evaluation" element={<EvaluationPage />} />
             <Route path="simulation" element={<SimulationPage />} />
             <Route path="users" element={<UsersPage />} />
+            <Route path="account" element={<MyAccountPage />} />
             <Route path="change-password" element={<ChangePasswordPage />} />
           </Route>
         </Routes>
