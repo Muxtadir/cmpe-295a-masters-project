@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -8,482 +9,547 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { AlertBanner } from "../components/AlertBanner.jsx";
+import { BusinessMetricCard } from "../components/BusinessMetricCard.jsx";
 import { ChartContainer } from "../components/ChartContainer.jsx";
-import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
+import { EmptyState } from "../components/EmptyState.jsx";
+import { LoadingGrid, LoadingSkeleton } from "../components/LoadingSkeleton.jsx";
+import { PageHeader } from "../components/PageHeader.jsx";
+import { ProductSelector } from "../components/ProductSelector.jsx";
+import { RecommendationCard } from "../components/RecommendationCard.jsx";
+import { StatusBadge } from "../components/StatusBadge.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useViewMode } from "../context/ViewModeContext.jsx";
+import { useForecastDimensions } from "../hooks/useForecastDimensions.js";
 import {
-  getBusinessDashboard,
+  getAssociationsForSku,
   getEvaluationMetrics,
   getForecast,
-  getForecastDimensions,
   getInventoryRecommendation,
-  getProducts,
+  getSales,
 } from "../services/api.js";
-import { pickBestForecastDimension } from "../utils/pickBestForecastDimension.js";
-
-function fmtMoney(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(
-    Number(n),
-  );
-}
-
-function fmtPct(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return `${Number(n).toFixed(1)}%`;
-}
-
-function RiskBadge({ label, active, tone }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        marginRight: "0.5rem",
-        marginBottom: "0.35rem",
-        padding: "0.25rem 0.6rem",
-        borderRadius: 999,
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        letterSpacing: "0.02em",
-        border: `1px solid ${tone}`,
-        color: active ? "#0f1419" : "#6e7681",
-        background: active ? tone : "transparent",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
+import { classifyForecastQuality } from "../utils/forecastQuality.js";
+import { displayOrDash, fmtNumber, fmtPct, fmtUnits } from "../utils/format.js";
+import {
+  demandOutlookFromForecast,
+  deriveInventoryHealth,
+  recommendationReason,
+} from "../utils/inventoryStatus.js";
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const role = user?.role;
-  /** Stable string avoids effect re-running on every new `user` object reference with same role. */
-  const roleKey = role ?? "";
-  const canRunInventory = roleKey === "admin" || roleKey === "store_manager";
+  const { isResearch } = useViewMode();
+  const canRunInventory = user?.role === "admin" || user?.role === "store_manager";
 
-  /** Kaggle: distinct (store_id, sku) = (store_nbr, item_nbr); fallback: legacy catalog from GET /products. */
-  const [dimensions, setDimensions] = useState([]);
-  const [storeId, setStoreId] = useState("");
-  const [sku, setSku] = useState("");
-  const [skus, setSkus] = useState([]);
+  const { sku, setSku, skuOptions, bootstrapping, bootstrapError } = useForecastDimensions();
+
+  const [forecastMode, setForecastMode] = useState("standard"); // standard | basket
   const [forecast, setForecast] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
-  const [inventoryRecommendation, setInventoryRecommendation] = useState(null);
-  const [business, setBusiness] = useState(null);
+  const [inventory, setInventory] = useState(null);
+  const [associations, setAssociations] = useState(null);
+  const [salesDaily, setSalesDaily] = useState([]);
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-  /** Evaluation runs heavy rolling Prophet — must not block forecast/chart. */
+  const [loading, setLoading] = useState(false);
   const [evalLoading, setEvalLoading] = useState(false);
-  const [evalError, setEvalError] = useState(null);
-  const [inventoryError, setInventoryError] = useState(null);
-  /** Avoid Strict Mode / dependency churn leaving loading=true when an older request finishes first. */
-  const loadGenRef = useRef(0);
+  const [invLoading, setInvLoading] = useState(false);
+  const [assocNote, setAssocNote] = useState(null);
+  const loadGen = useRef(0);
 
-  const storeQuery = useMemo(() => (storeId ? { store_id: storeId } : {}), [storeId]);
+  const selected = useMemo(() => skuOptions.find((o) => o.sku === sku) || null, [skuOptions, sku]);
+  const historyDays = selected?.distinct_sale_days ?? null;
+  const relatedCount = associations?.related?.length ?? 0;
+  const basketAvailable = relatedCount > 0;
 
-  /** Bootstrap SKU list from Kaggle dimensions or legacy product catalog. */
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const dim = await getForecastDimensions();
-        if (!cancelled && Array.isArray(dim) && dim.length > 0) {
-          setDimensions(dim);
-          const best = pickBestForecastDimension(dim);
-          if (best) {
-            setStoreId(best.store_id);
-            setSku(best.sku);
-            setSkus(dim.filter((d) => d.store_id === best.store_id).map((d) => d.sku));
-          }
-          return;
-        }
-        const productRows = await getProducts();
-        const safeRows = Array.isArray(productRows) ? productRows : [];
-        const skuList = safeRows.map((p) => p.sku);
-        if (!cancelled && skuList.length > 0) {
-          setDimensions([]);
-          setStoreId("");
-          setSkus(skuList);
-          setSku(skuList[0]);
-        }
-      } catch (e) {
-        console.error("[Dashboard] bootstrap SKU list failed", e?.response?.data ?? e?.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (forecastMode === "basket" && associations && !basketAvailable) {
+      setForecastMode("standard");
+    }
+  }, [forecastMode, associations, basketAvailable]);
 
-  /** When store changes, restrict SKU choices (Kaggle mode). */
-  useEffect(() => {
-    if (!dimensions.length || !storeId) return;
-    const list = dimensions.filter((d) => d.store_id === storeId).map((d) => d.sku);
-    setSkus(list);
-    setSku((prev) => (list.includes(prev) ? prev : list[0] ?? ""));
-  }, [storeId, dimensions]);
-
-  /** Core dashboard: forecast, business, inventory (not evaluation — see separate effect). */
   useEffect(() => {
     if (!sku) {
-      setLoading(false);
+      setForecast(null);
+      setInventory(null);
+      setAssociations(null);
+      setSalesDaily([]);
       return;
     }
-    const gen = ++loadGenRef.current;
+    const gen = ++loadGen.current;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
-      setInventoryError(null);
-      console.log("[Dashboard] load start", { sku, storeId, baseURL: typeof window !== "undefined" ? window.location.origin : "" });
+      setInvLoading(true);
       try {
-        const effectiveSku = sku;
-
-        console.log("[Dashboard] parallel GET /forecast + GET /business/dashboard …", { sku: effectiveSku, storeId });
-        const [f, biz] = await Promise.all([
-          getForecast(effectiveSku, { horizon_days: 30, model: "prophet", ...storeQuery }),
-          getBusinessDashboard(effectiveSku, storeQuery),
+        const assocAware = forecastMode === "basket";
+        const [fRes, salesRes, assocRes] = await Promise.allSettled([
+          getForecast(sku, { horizon_days: 30, model: "prophet", association_aware: assocAware }),
+          getSales({ sku }),
+          getAssociationsForSku(sku, { min_confidence: 0.2, min_lift: 1.0, limit: 8 }),
         ]);
-        console.log("[Dashboard] forecast + business done", {
-          forecastStatus: "ok",
-          model: f?.model_name,
-          points: f?.predictions?.length,
-          businessOk: !!biz,
-        });
-        if (cancelled || gen !== loadGenRef.current) return;
-        setForecast(f);
-        setBusiness(biz);
-        // Clear loading as soon as forecast + business are back — do not wait on inventory (can be slow or hang).
-        setLoading(false);
-        console.log("[Dashboard] main data ready (loading=false), inventory next…");
+        if (cancelled || gen !== loadGen.current) return;
 
-        if (roleKey === "admin" || roleKey === "store_manager") {
-          try {
-            console.log("[Dashboard] POST /inventory/recommendation …");
-            const inv = await getInventoryRecommendation({
-              sku: effectiveSku,
-              store_id: storeId || undefined,
-              use_latest_forecast: true,
-              disruption_lead_time_days: 20,
-            });
-            console.log("[Dashboard] inventory recommendation done", { status: "ok", decisionId: inv?.decision_id });
-            if (!cancelled && gen === loadGenRef.current) setInventoryRecommendation(inv);
-          } catch (invErr) {
-            const msg = invErr?.response?.data?.detail || invErr?.message || "Inventory recommendation failed";
-            console.error("[Dashboard] inventory recommendation failed", invErr?.response?.status, msg);
-            if (!cancelled && gen === loadGenRef.current) {
-              setInventoryRecommendation(null);
-              setInventoryError(typeof msg === "string" ? msg : JSON.stringify(msg));
-            }
-          }
-        } else {
-          if (!cancelled && gen === loadGenRef.current) setInventoryRecommendation(null);
+        if (fRes.status === "fulfilled") setForecast(fRes.value);
+        else {
+          setForecast(null);
+          const d = fRes.reason?.response?.data?.detail;
+          setError(typeof d === "string" ? d : fRes.reason?.message || "Forecast failed");
         }
+
+        if (salesRes.status === "fulfilled") {
+          setSalesDaily(Array.isArray(salesRes.value?.daily_aggregate) ? salesRes.value.daily_aggregate : []);
+        } else setSalesDaily([]);
+
+        if (assocRes.status === "fulfilled") {
+          setAssociations(assocRes.value);
+          setAssocNote(assocRes.value?.note || null);
+        } else {
+          setAssociations(null);
+          setAssocNote(null);
+        }
+
+        if (canRunInventory) {
+          try {
+            // Nominal lead time (no forced disruption) for true inventory status.
+            const inv = await getInventoryRecommendation({
+              sku,
+              use_latest_forecast: true,
+              disruption_lead_time_days: null,
+            });
+            if (!cancelled && gen === loadGen.current) setInventory(inv);
+          } catch (e) {
+            if (!cancelled && gen === loadGen.current) setInventory(null);
+          }
+        } else setInventory(null);
       } catch (e) {
-        const detail = e?.response?.data?.detail;
-        const msg = typeof detail === "string" ? detail : e?.message || "Dashboard load failed";
-        console.error("[Dashboard] load failed", {
-          status: e?.response?.status,
-          detail,
-          message: e?.message,
-        });
-        if (!cancelled && gen === loadGenRef.current) setError(msg);
-        if (!cancelled && gen === loadGenRef.current) setLoading(false);
+        if (!cancelled && gen === loadGen.current) {
+          setError(e?.message || "Dashboard load failed");
+        }
+      } finally {
+        if (!cancelled && gen === loadGen.current) {
+          setLoading(false);
+          setInvLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sku, storeId, storeQuery, roleKey]);
+  }, [sku, forecastMode, canRunInventory]);
 
-  /** Heavy endpoint — loads after chart data so UI is not stuck on "Loading…". */
   useEffect(() => {
     if (!sku) {
-      setEvalLoading(false);
       setEvaluation(null);
       return;
     }
     let cancelled = false;
     (async () => {
       setEvalLoading(true);
-      setEvalError(null);
-      setEvaluation(null);
-      console.log("[Dashboard] GET /evaluation …", { sku, storeId });
       try {
-        const ev = await getEvaluationMetrics(sku, storeQuery);
-        console.log("[Dashboard] GET /evaluation done", { status: "ok", hasMetrics: !!ev?.metrics });
+        const ev = await getEvaluationMetrics(sku, { window_days: 7, train_window: 30 });
         if (!cancelled) setEvaluation(ev);
-      } catch (e) {
-        const detail = e?.response?.data?.detail;
-        const msg = typeof detail === "string" ? detail : e?.message || "Evaluation failed";
-        console.error("[Dashboard] evaluation failed", e?.response?.status, msg);
-        if (!cancelled) setEvalError(msg);
+      } catch {
+        if (!cancelled) setEvaluation(null);
       } finally {
-        if (!cancelled) {
-          setEvalLoading(false);
-          console.log("[Dashboard] evaluation finished (evalLoading=false)");
-        }
+        if (!cancelled) setEvalLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sku, storeQuery]);
+  }, [sku]);
+
+  const exp = inventory?.explanation || {};
+  const m = evaluation?.metrics || {};
+  const rb = m.rolling_backtest || {};
+  const nWin = Number(rb.n_windows ?? 0);
+  const quality = classifyForecastQuality({
+    mape: rb.mape,
+    mae: rb.mae ?? m.mae,
+    avgDailyDemand: m.avg_daily_demand,
+    zeroDemandDaysPct: m.zero_demand_days_pct,
+    nWindows: nWin,
+  });
+  const health = deriveInventoryHealth({
+    explanation: exp,
+    evaluationMetrics: m,
+    recommendedQty: inventory?.recommended_order_quantity,
+  });
+  const outlook = demandOutlookFromForecast(forecast?.predictions);
+  const reason = recommendationReason(exp, inventory?.recommended_order_quantity);
+
+  const expectedDemand30 = useMemo(() => {
+    const preds = forecast?.predictions;
+    if (!Array.isArray(preds) || preds.length === 0) return null;
+    return preds.reduce((s, p) => s + (Number(p.yhat) || 0), 0);
+  }, [forecast]);
 
   const chartData = useMemo(() => {
-    if (!forecast?.predictions) return [];
-    return forecast.predictions.map((p) => ({
-      date: p.ds,
-      yhat: p.yhat,
-      lower: p.yhat_lower,
-      upper: p.yhat_upper,
-    }));
-  }, [forecast]);
-
-  const metrics = useMemo(() => {
-    // SKU is already shown in SKUSelector above — avoid duplicate "SKU" rows.
-    if (!forecast) return [];
-    const rows = [
-      { label: "Model", value: forecast.model_name },
-      { label: "Horizon (d)", value: String(forecast.horizon_days) },
-    ];
-    if (forecast.store_id != null && forecast.store_id !== "") {
-      rows.push({ label: "Store (store_nbr)", value: String(forecast.store_id) });
+    const hist = (salesDaily || [])
+      .slice(-60)
+      .map((r) => ({
+        date: String(r.sale_date).slice(0, 10),
+        actual: Number(r.total_quantity),
+      }));
+    const byDate = new Map(hist.map((h) => [h.date, { ...h }]));
+    for (const p of forecast?.predictions || []) {
+      const date = String(p.ds).slice(0, 10);
+      const row = byDate.get(date) || { date };
+      row.forecast = Number(p.yhat);
+      row.lower = p.yhat_lower != null ? Number(p.yhat_lower) : undefined;
+      row.upper = p.yhat_upper != null ? Number(p.yhat_upper) : undefined;
+      byDate.set(date, row);
     }
-    return rows;
-  }, [forecast]);
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [salesDaily, forecast]);
 
-  const evalItems = useMemo(() => {
-    const m = evaluation?.metrics || {};
-    const rb = m.rolling_backtest || {};
-    const nWin = Number(rb.n_windows ?? 0);
-    const maeShow = nWin > 0 ? Number(rb.mae ?? m.mae ?? 0).toFixed(2) : "—";
-    const imprShow = `${Number(m.improvement_percent ?? 0).toFixed(2)}%`;
-    const lat = Number(m.decision_latency_seconds ?? 0);
-    const latShow = lat > 0 ? `${lat.toFixed(2)}s` : "—";
-    return [
-      { label: "MAE (rolling)", value: maeShow },
-      { label: "Stockout rate", value: `${Number(m.stockout_rate ?? 0).toFixed(2)}%` },
-      { label: "Overstock %", value: `${Number(m.overstock_percentage ?? 0).toFixed(2)}%` },
-      { label: "Forecast → decision (latest)", value: latShow },
-      { label: "Stockout vs baseline", value: imprShow },
-    ];
-  }, [evaluation]);
-
-  const inventoryItems = useMemo(() => {
-    const exp = inventoryRecommendation?.explanation || {};
-    return [
-      {
-        label: "Recommended reorder qty",
-        value: String(inventoryRecommendation?.recommended_order_quantity ?? 0),
-      },
-      {
-        label: "Lead time (effective)",
-        value: `${Number(exp.lead_time_days_effective ?? 0)} days`,
-      },
-      {
-        label: "Safety stock",
-        value: String(exp.safety_stock ?? "0"),
-      },
-      {
-        label: "Supply adjustment",
-        value: exp.supply_adjustment ? "Yes" : "No",
-      },
-    ];
-  }, [inventoryRecommendation]);
-
-  const explanationSummary = useMemo(() => {
-    const exp = inventoryRecommendation?.explanation || {};
-    if (!inventoryRecommendation) {
-      if (!canRunInventory) return "Inventory replenishment runs are restricted to administrators and store managers.";
-      if (inventoryError) return `Could not load recommendation: ${inventoryError}`;
-      return "No inventory recommendation available.";
+  const supplyStatus = (() => {
+    if (!inventory) return { label: null, detail: "Supply status unavailable until a recommendation is generated." };
+    if (exp.supply_adjustment || exp.disruption_applied) {
+      return {
+        label: "Supplier delay adjustment active",
+        detail: `Effective lead time ${exp.lead_time_days_effective ?? "—"} days (nominal ${exp.lead_time_days_nominal ?? "—"}).`,
+      };
     }
-    const projected = Number(exp.projected_position_after_lead_time ?? 0).toFixed(1);
-    const originalLead = exp.original_lead_time ?? exp.lead_time_days_nominal ?? 0;
-    const adjustedLead = exp.adjusted_lead_time ?? exp.lead_time_days_effective ?? 0;
-    return (
-      `Policy ${exp.policy || "N/A"} recommended ${inventoryRecommendation.recommended_order_quantity ?? 0} units. ` +
-      `Lead time adjusted from ${originalLead} to ${adjustedLead} days. ` +
-      `Projected position after lead time: ${projected}.`
-    );
-  }, [inventoryRecommendation, canRunInventory, inventoryError]);
+    return {
+      label: "Normal lead time",
+      detail: `Using nominal supplier lead time of ${exp.lead_time_days_nominal ?? exp.lead_time_days_effective ?? "—"} days.`,
+    };
+  })();
 
-  const impact = business?.impact;
-  const risks = business?.risks;
+  const degraded = forecast?.degraded || forecast?.metrics?.degraded;
 
   return (
     <div>
-      <h1 style={{ fontSize: "1.5rem", marginTop: 0 }}>Operations overview</h1>
-      <p style={{ color: "#8b949e", maxWidth: 720 }}>
-        Unified monitoring for forecast quality, business impact estimates, inventory posture, and supply-adjusted
-        recommendations. Demand forecasts use <strong>daily sales per store × SKU</strong> (Kaggle{" "}
-        <code style={{ color: "#8b949e" }}>store_nbr</code> × <code style={{ color: "#8b949e" }}>item_nbr</code>),
-        not product-family rollups (<code style={{ color: "#8b949e" }}>items.csv</code> families are unused in the model).
-      </p>
+      <PageHeader
+        title="Overview"
+        lead="See demand outlook, inventory posture, product connections, and the recommended next action for one product."
+      />
 
-      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem", maxWidth: 560 }}>
-        {dimensions.length > 0 && (
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", color: "#8b949e", fontSize: "0.85rem" }}>
-            {UI_LABEL_STORE_NBR}
-            <select
-              value={storeId}
-              onChange={(e) => setStoreId(e.target.value)}
-              style={{
-                background: "#0d1117",
-                border: "1px solid #30363d",
-                color: "#e6edf3",
-                borderRadius: 6,
-                padding: "0.5rem",
-                minWidth: 120,
-              }}
-            >
-              {[...new Set(dimensions.map((d) => d.store_id))]
-                .filter(Boolean)
-                .sort()
-                .map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-            </select>
-          </label>
-        )}
-        <div style={{ flex: "1 1 220px", maxWidth: 280 }}>
-          <SKUSelector skus={skus} value={sku} onChange={setSku} />
-        </div>
-      </div>
-      {metrics.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
-          {metrics.map((m, i) => (
-            <MetricCard key={`${m.label}-${i}`} label={m.label} value={m.value} />
-          ))}
-        </div>
-      )}
-      {!loading && !error && (forecast?.degraded || forecast?.metrics?.degraded) && (
-        <div style={{ color: "#d29922", marginBottom: "0.75rem", maxWidth: 720, lineHeight: 1.5 }}>
-          Forecast could not be generated for this store/SKU (often: fewer than 30 distinct days of sales).{" "}
-          {typeof forecast?.metrics?.detail === "string" ? forecast.metrics.detail : ""}
-        </div>
-      )}
+      {bootstrapping && <LoadingSkeleton label="Loading product catalog…" />}
+      {bootstrapError && <AlertBanner tone="danger">{bootstrapError}</AlertBanner>}
 
-      {!sku && !loading && (
-        <div style={{ color: "#8b949e", marginBottom: "0.75rem" }}>
-          No sales data yet. Load the Favorita dataset with{" "}
-          <code style={{ color: "#58a6ff" }}>PYTHONPATH=. python scripts/load_kaggle_dataset.py train.csv</code> from the
-          backend folder, or run the demo seed script for sample SKUs.
-        </div>
-      )}
-      {loading && sku && <div style={{ color: "#8b949e" }}>Loading…</div>}
-      {error && (
-        <div style={{ color: "#f85149", marginTop: "0.5rem" }}>
-          {typeof error === "string" ? error : JSON.stringify(error)}
-        </div>
-      )}
-
-      {!loading && !error && impact && (
-        <div style={{ marginBottom: "1.25rem" }}>
-          <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Business impact</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "0.75rem" }}>
-            <MetricCard label="Est. revenue (30d)" value={fmtMoney(impact.estimated_revenue_30d)} accent="#58a6ff" />
-            <MetricCard
-              label="Stockout loss avoided (est.)"
-              value={fmtMoney(impact.estimated_stockout_loss_avoided)}
-              accent="#3fb950"
-            />
-            <MetricCard
-              label="Holding cost / day (est.)"
-              value={fmtMoney(impact.estimated_holding_cost_daily)}
-              accent="#d29922"
-            />
-            <MetricCard
-              label="Agentic vs baseline (stockout)"
-              value={fmtPct(impact.agentic_vs_baseline_improvement_percent)}
-              accent="#a371f7"
-            />
-          </div>
-          {risks && (
+      {!bootstrapping && (
+        <section className="card" style={{ marginBottom: "1.15rem" }}>
+          <h2 className="card-title">Product intelligence</h2>
+          <p className="card-subtitle">Select a StockCode to inspect demand, associations, and replenishment advice.</p>
+          <ProductSelector options={skuOptions} value={sku} onChange={setSku} />
+          {sku ? (
             <div style={{ marginTop: "0.85rem" }}>
-              <div style={{ color: "#8b949e", fontSize: "0.85rem", marginBottom: "0.35rem" }}>Risk signals</div>
-              <div>
-                <RiskBadge label="High stockout risk" active={risks.high_stockout_risk} tone="#f85149" />
-                <RiskBadge label="Excess inventory risk" active={risks.excess_inventory_risk} tone="#d29922" />
-                <RiskBadge label="Supply disruption active" active={risks.supply_disruption_active} tone="#58a6ff" />
+              <div style={{ fontSize: "1.15rem", fontWeight: 650, letterSpacing: "-0.02em" }}>
+                {sku}
+                {selected?.description ? (
+                  <span style={{ display: "block", color: "var(--muted)", fontSize: "0.95rem", fontWeight: 400, marginTop: 2 }}>
+                    {selected.description}
+                  </span>
+                ) : null}
+              </div>
+              <div className="meta-chips">
+                <span className={`chip ${historyDays != null && historyDays >= 30 ? "is-on" : ""}`}>
+                  {historyDays != null ? `${historyDays} historical sale days` : "History unknown"}
+                </span>
+                <span className={`chip ${basketAvailable ? "is-on" : ""}`}>
+                  {associations == null
+                    ? "Associations loading…"
+                    : basketAvailable
+                      ? `${relatedCount} basket association${relatedCount === 1 ? "" : "s"}`
+                      : "No basket associations"}
+                </span>
+                <span className="chip is-on">Forecast horizon: 30 days</span>
               </div>
             </div>
-          )}
-        </div>
+          ) : null}
+        </section>
       )}
 
-      {!loading && !error && chartData.length > 0 && (
-        <ChartContainer title="Forecast (Prophet)">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid stroke="#30363d" strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fill: "#8b949e", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#8b949e", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d" }} labelStyle={{ color: "#e6edf3" }} />
-              <Line type="monotone" dataKey="yhat" stroke="#58a6ff" dot={false} name="Forecast" />
-              <Line type="monotone" dataKey="lower" stroke="#3fb950" dot={false} name="Lower" />
-              <Line type="monotone" dataKey="upper" stroke="#d29922" dot={false} name="Upper" />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartContainer>
+      {!bootstrapping && !sku && (
+        <EmptyState
+          title="No product selected"
+          description="Load Online Retail II sales history, then pick a StockCode to open the command center."
+        />
       )}
 
-      {!loading && !error && chartData.length === 0 && (
-        <div style={{ color: "#8b949e", marginTop: "1rem" }}>No forecast data available yet for this SKU.</div>
+      {sku && loading && <LoadingGrid count={4} label="Analyzing sales history and generating demand forecast…" />}
+      {error && <AlertBanner tone="danger">{error}</AlertBanner>}
+      {degraded && !loading && (
+        <AlertBanner tone="warning">
+          Not enough history to generate a reliable forecast for this product.
+          {typeof forecast?.metrics?.detail === "string" ? ` ${forecast.metrics.detail}` : ""}
+        </AlertBanner>
       )}
 
-      {!loading && !error && (
-        <div style={{ marginTop: "1rem" }}>
-          <h2 style={{ fontSize: "1.05rem", marginBottom: "0.75rem" }}>Evaluation metrics</h2>
-          {evalLoading && <div style={{ color: "#8b949e" }}>Loading evaluation metrics (rolling backtest may take a moment)…</div>}
-          {evalError && (
-            <div style={{ color: "#d29922", marginTop: "0.35rem", lineHeight: 1.45 }}>
-              Evaluation could not be loaded: {evalError}
+      {sku && !loading && (
+        <>
+          <section className="section">
+            <div className="section-head">
+              <h2>What needs your attention?</h2>
             </div>
-          )}
-          {!evalLoading && !evalError && evaluation && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem" }}>
-              {evalItems.map((m) => (
-                <MetricCard key={m.label} label={m.label} value={m.value} accent="#3fb950" />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!loading && !error && (
-        <div style={{ marginTop: "1rem" }}>
-          <h2 style={{ fontSize: "1.05rem", marginBottom: "0.75rem" }}>Inventory recommendation</h2>
-          {canRunInventory ? (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem" }}>
-                {inventoryItems.map((m) => (
-                  <MetricCard key={m.label} label={m.label} value={m.value} accent="#d29922" />
-                ))}
+            <div className="attention-grid">
+              <div className="card">
+                <div className="muted" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Demand outlook
+                </div>
+                <p style={{ margin: "0.45rem 0 0.25rem", fontWeight: 650 }}>
+                  {outlook.label || "Unavailable"}
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                  {outlook.detail}
+                </p>
               </div>
-              <div
-                style={{
-                  marginTop: "0.75rem",
-                  background: "#161b22",
-                  border: "1px solid #30363d",
-                  borderRadius: 8,
-                  padding: "0.85rem 1rem",
-                  color: "#8b949e",
-                  lineHeight: 1.5,
-                }}
+              <div className="card">
+                <div className="muted" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Inventory status
+                </div>
+                <div style={{ margin: "0.45rem 0" }}>
+                  <StatusBadge label={health.status} tone={health.tone} />
+                </div>
+                <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                  {health.summary}
+                </p>
+              </div>
+              <div className="card">
+                <div className="muted" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Recommended action
+                </div>
+                <p style={{ margin: "0.45rem 0 0.25rem", fontWeight: 650, fontSize: "1.2rem" }}>
+                  {inventory == null
+                    ? invLoading
+                      ? "Calculating…"
+                      : canRunInventory
+                        ? "Unavailable"
+                        : "Restricted"
+                    : Number(inventory.recommended_order_quantity) > 0
+                      ? `Order ${displayOrDash(fmtUnits(inventory.recommended_order_quantity, 0))} units`
+                      : "No order needed"}
+                </p>
+                {!canRunInventory ? (
+                  <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                    Inventory recommendations require store manager or admin access.
+                  </p>
+                ) : null}
+              </div>
+              <div className="card">
+                <div className="muted" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Supply status
+                </div>
+                <p style={{ margin: "0.45rem 0 0.25rem", fontWeight: 650 }}>{supplyStatus.label || "Unavailable"}</p>
+                <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                  {supplyStatus.detail}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Business snapshot</h2>
+            </div>
+            <div className="kpi-grid">
+              <BusinessMetricCard
+                label="Expected demand"
+                value={expectedDemand30 == null ? null : `${fmtNumber(expectedDemand30, 0)} units`}
+                hint="Next 30 days (forecast sum)"
+                tooltip="Sum of predicted daily demand over the 30-day forecast horizon."
+              />
+              <BusinessMetricCard
+                label="Current inventory"
+                value={exp.quantity_on_hand != null ? `${fmtUnits(exp.quantity_on_hand, 0)} units` : m.inventory_snapshot != null ? `${fmtUnits(m.inventory_snapshot, 0)} units` : null}
+                tooltip="Units currently on hand for this product."
+              />
+              <BusinessMetricCard
+                label="Days of cover"
+                value={health.daysOfCover != null ? fmtNumber(health.daysOfCover, 1) : null}
+                tooltip="Estimated number of days current inventory can satisfy typical demand."
+              />
+              <BusinessMetricCard
+                label="Recommended order"
+                value={inventory ? `${fmtUnits(inventory.recommended_order_quantity, 0)} units` : null}
+                tooltip="Units suggested by the inventory policy given forecast demand and lead time."
+              />
+              <BusinessMetricCard
+                label="Effective lead time"
+                value={exp.lead_time_days_effective != null ? `${exp.lead_time_days_effective} days` : null}
+                tooltip="Expected supplier delivery time currently used by the inventory policy."
+              />
+              <BusinessMetricCard
+                label="Safety stock"
+                value={exp.safety_stock != null ? `${fmtUnits(exp.safety_stock, 0)} units` : null}
+                tooltip="Extra inventory maintained to protect against demand and delivery uncertainty."
+              />
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Demand forecast</h2>
+              <div className="segmented" role="group" aria-label="Forecast method">
+                <button type="button" aria-pressed={forecastMode === "standard"} onClick={() => setForecastMode("standard")}>
+                  Standard forecast
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={forecastMode === "basket"}
+                  disabled={!basketAvailable}
+                  title={!basketAvailable ? "Not enough product-association data is available for this item." : undefined}
+                  onClick={() => setForecastMode("basket")}
+                >
+                  Basket-aware forecast
+                </button>
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "0.88rem" }}>
+              Model: Prophet · Horizon: 30 days
+              {forecastMode === "basket" ? " · Using related-product demand as extra signals" : ""}
+            </p>
+            {!basketAvailable && associations && (
+              <AlertBanner tone="info">
+                Basket-aware forecasting is unavailable for this item — not enough product-association data.
+                {assocNote ? ` ${assocNote}` : ""}
+              </AlertBanner>
+            )}
+            {chartData.length > 0 ? (
+              <ChartContainer
+                title="Historical sales and forecast"
+                meta="Actual daily units (recent history) with predicted demand and confidence range when available."
               >
-                {explanationSummary}
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fill: "var(--muted)", fontSize: 11 }} minTickGap={28} />
+                    <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{ background: "#0f161e", border: "1px solid var(--border)" }}
+                      labelStyle={{ color: "var(--text)" }}
+                      formatter={(val, name) => (val == null ? [null, null] : [Number(val).toFixed(1), name])}
+                    />
+                    <Legend />
+                    <Line type="monotone" dataKey="actual" stroke="#d4a017" dot={false} name="Actual sales" strokeWidth={2} />
+                    <Line type="monotone" dataKey="forecast" stroke="#5b9fd4" dot={false} name="Forecast" strokeWidth={2} />
+                    <Line type="monotone" dataKey="lower" stroke="#5b9fd4" strokeDasharray="4 4" dot={false} name="Expected low" strokeOpacity={0.55} />
+                    <Line type="monotone" dataKey="upper" stroke="#5b9fd4" strokeDasharray="4 4" dot={false} name="Expected high" strokeOpacity={0.55} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            ) : (
+              <EmptyState title="No forecast chart yet" description="Not enough history to generate a forecast for this product." />
+            )}
+          </section>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Recommended action</h2>
+            </div>
+            {invLoading ? (
+              <LoadingSkeleton label="Calculating inventory recommendation…" />
+            ) : (
+              <RecommendationCard
+                decisionType={inventory?.decision_type}
+                quantity={inventory?.recommended_order_quantity}
+                reason={reason}
+                supporting={[
+                  { label: "Current inventory", value: exp.quantity_on_hand != null ? `${exp.quantity_on_hand}` : null },
+                  {
+                    label: "Lead-time demand",
+                    value: exp.lead_time_demand_estimate != null ? fmtNumber(exp.lead_time_demand_estimate, 0) : null,
+                  },
+                  { label: "Safety stock", value: exp.safety_stock != null ? `${exp.safety_stock}` : null },
+                  {
+                    label: "Effective lead time",
+                    value: exp.lead_time_days_effective != null ? `${exp.lead_time_days_effective}d` : null,
+                  },
+                  { label: "Target (max stock)", value: exp.max_stock_level != null ? `${exp.max_stock_level}` : null },
+                ]}
+                technical={
+                  inventory ? (
+                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      {JSON.stringify(exp, null, 2)}
+                    </pre>
+                  ) : (
+                    "No recommendation payload available."
+                  )
+                }
+              />
+            )}
+          </section>
+
+          <section className="section">
+            <div className="section-head">
+              <h2>Basket-aware forecasting</h2>
+            </div>
+            <p className="muted" style={{ marginTop: 0, maxWidth: 720 }}>
+              We test whether demand patterns from frequently purchased-together products improve demand forecasting.
+            </p>
+            <div className="card">
+              <div style={{ fontWeight: 650, marginBottom: "0.5rem" }}>Forecasting {sku}</div>
+              {basketAvailable ? (
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)" }}>
+                  {(associations.related || []).slice(0, 5).map((r) => (
+                    <li key={r.sku}>
+                      {r.sku}
+                      {r.lift != null ? ` — Lift ${Number(r.lift).toFixed(1)}×` : ""}
+                      {r.confidence != null ? ` · Confidence ${fmtPct(Number(r.confidence) * 100, 0)}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  No related products available to feed basket-aware forecasting for this item.
+                </p>
+              )}
+              <p style={{ margin: "0.85rem 0 0" }}>
+                <a href="/evaluation">Open Evaluation</a> for the measured standard vs basket-aware comparison on this
+                product.
+              </p>
+            </div>
+          </section>
+
+          <section className="section">
+            <details className="expandable" open={isResearch}>
+              <summary>Forecast performance {quality.label ? `(${quality.label})` : ""}</summary>
+              <div style={{ marginTop: "0.75rem" }}>
+                {evalLoading && <LoadingSkeleton label="Evaluating forecast quality…" />}
+                {!evalLoading && (
+                  <>
+                    <div style={{ marginBottom: "0.65rem" }}>
+                      <StatusBadge label={quality.label ? `Forecast quality: ${quality.label}` : null} tone={quality.tone} />
+                    </div>
+                    {quality.warning && <AlertBanner tone="warning">{quality.warning}</AlertBanner>}
+                    <div className="kpi-grid">
+                      <BusinessMetricCard
+                        label="MAE"
+                        value={nWin > 0 ? fmtNumber(rb.mae ?? m.mae, 2) : null}
+                        tooltip="Average number of units the forecast was off by."
+                      />
+                      <BusinessMetricCard
+                        label="RMSE"
+                        value={nWin > 0 ? fmtNumber(rb.rmse, 2) : null}
+                        tooltip="Forecast error metric that penalizes large misses more strongly."
+                      />
+                      <BusinessMetricCard
+                        label="MAPE"
+                        value={nWin > 0 ? fmtPct(rb.mape, 1) : null}
+                        tooltip="Average forecast error as a percentage. It may become unstable for products with very low or zero sales."
+                      />
+                      <BusinessMetricCard
+                        label="Backtest windows"
+                        value={nWin > 0 ? String(nWin) : null}
+                        tooltip="Number of historical forecast tests used to evaluate this model."
+                      />
+                    </div>
+                    <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.75rem" }}>
+                      Simulated inventory walk-forward: stockout days {m.stockout_rate != null ? fmtPct(m.stockout_rate, 1) : "—"} ·
+                      days above max-stock policy {m.overstock_percentage != null ? fmtPct(m.overstock_percentage, 1) : "—"} ·
+                      days between reorder point and max stock (policy band){" "}
+                      {m.balanced_days_pct != null ? fmtPct(m.balanced_days_pct, 1) : "—"}. Policy band is not the same as
+                      “healthy inventory” when stockout risk is high.
+                    </p>
+                  </>
+                )}
               </div>
-            </>
-          ) : (
-            <div style={{ color: "#8b949e", lineHeight: 1.5 }}>{explanationSummary}</div>
-          )}
-        </div>
+            </details>
+          </section>
+        </>
       )}
     </div>
   );

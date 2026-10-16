@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.routes import (
     agent_logs,
     analytics,
+    associations,
     auth,
     business,
     evaluation,
@@ -27,6 +28,7 @@ api_router.include_router(sales.router, tags=["sales"])
 api_router.include_router(forecast.router, tags=["forecast"])
 api_router.include_router(inventory.router, tags=["inventory"])
 api_router.include_router(evaluation.router, tags=["evaluation"])
+api_router.include_router(associations.router)
 api_router.include_router(products.router, tags=["products"])
 api_router.include_router(agent_logs.router, tags=["agent-logs"])
 api_router.include_router(simulation.router, tags=["simulation"])

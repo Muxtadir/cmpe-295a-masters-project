@@ -31,9 +31,6 @@ Default ``--max-rows`` is 1500000 (better temporal coverage than a short prefix)
 Aggregation is incremental in memory (key = date × store × item) to avoid holding a list of
 per-chunk frames. Rows are aggregated before insert at (date × store_id × sku).
 
-``items.csv`` (product family / category) is **not** loaded here: the pipeline and Prophet models use **SKU-level**
-``item_nbr`` only; families are never aggregated for forecasting.
-
 Post-load: logs top 20 (store_id, sku) by COUNT(DISTINCT sale_date) for Kaggle rows and for all sources.
 """
 
@@ -121,8 +118,10 @@ def _prepare_chunk(raw: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise SystemExit(f"train.csv missing columns {missing}; got {list(raw.columns)}")
 
-    df = raw[[colmap[k] for k in sorted(need)]].copy()
-    df.columns = ["date", "store_nbr", "item_nbr", "unit_sales"]
+    # Keep column order explicit — never use sorted(need), which swaps store_nbr/item_nbr.
+    ordered = ["date", "store_nbr", "item_nbr", "unit_sales"]
+    df = raw[[colmap[k] for k in ordered]].copy()
+    df.columns = ordered
     df = df.dropna(subset=["date", "store_nbr", "item_nbr", "unit_sales"])
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])

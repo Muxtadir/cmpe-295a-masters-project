@@ -8,7 +8,14 @@ from app.database import Base
 
 
 class SalesHistory(Base):
-    """Point-in-time sales (Kaggle Favorita: item_nbr→sku, store_nbr→store_id, unit_sales→quantity)."""
+    """
+    Daily (or point-in-time) sales.
+
+    Active pipeline: Online Retail II StockCode→sku, InvoiceDate→sale_date,
+    Quantity→quantity aggregated daily. ``store_id`` is NULL (no multi-store).
+
+    Legacy Favorita loader still maps item_nbr/store_nbr but is not used actively.
+    """
 
     __tablename__ = "sales_history"
     __table_args__ = (

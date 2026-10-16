@@ -26,24 +26,25 @@ def inventory_recommendation(
 ) -> InventoryRecommendationResponse:
     forecast_result_id: int | None = None
     preds: list[dict] | None = None
+    # Online Retail II active pipeline: no physical stores — never fabricate store_id.
+    store_id = None
 
     try:
-        stmt = select(InventoryRecord).where(InventoryRecord.sku == payload.sku)
-        if payload.store_id is not None:
-            stmt = stmt.where(InventoryRecord.store_id == payload.store_id)
-        else:
-            stmt = stmt.where(InventoryRecord.store_id.is_(None))
+        stmt = select(InventoryRecord).where(
+            InventoryRecord.sku == payload.sku,
+            InventoryRecord.store_id.is_(None),
+        )
         record = db.execute(stmt).scalar_one_or_none()
         if record is None:
             try:
-                record = ensure_inventory_record(db, payload.sku, payload.store_id)
+                record = ensure_inventory_record(db, payload.sku, store_id)
             except Exception:
                 logger.exception("ensure_inventory_record failed; using minimal row sku=%s", payload.sku)
                 db.rollback()
-                record = minimal_inventory_record(db, payload.sku, payload.store_id)
+                record = minimal_inventory_record(db, payload.sku, store_id)
 
         if payload.use_latest_forecast:
-            fr = db.execute(select_latest_forecast_result(payload.sku, payload.store_id)).scalar_one_or_none()
+            fr = db.execute(select_latest_forecast_result(payload.sku, store_id)).scalar_one_or_none()
             if fr is not None:
                 forecast_result_id = fr.id
                 preds = list(fr.predictions) if isinstance(fr.predictions, list) else None
@@ -71,10 +72,10 @@ def inventory_recommendation(
         )
     except Exception as e:
         db.rollback()
-        logger.exception("Inventory recommendation failed sku=%s store_id=%s", payload.sku, payload.store_id)
+        logger.exception("Inventory recommendation failed sku=%s store_id=%s", payload.sku, store_id)
         return InventoryRecommendationResponse(
             sku=payload.sku,
-            store_id=payload.store_id,
+            store_id=store_id,
             decision_id=None,
             recommended_order_quantity=0,
             decision_type="no_action",

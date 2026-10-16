@@ -20,20 +20,20 @@ class EvaluationMetrics(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     mae: float = Field(description="Rolling-window MAE when n_windows>0; else 0.")
-    stockout_rate: float = Field(
-        description=(
-            "% of simulated days where actual demand exceeds on-hand inventory **before** that day's demand "
-            "(daily ledger with lead-time replenishment and agent orders)."
-        ),
-    )
+    stockout_rate: float = Field(description="% of mornings where demand > inventory_available.")
     overstock_percentage: float = Field(
-        description=(
-            "% of simulated days where on-hand inventory **before** demand strictly exceeds demand "
-            "(same simulation timeline as stockout_rate)."
-        ),
+        description="% of mornings where inventory_available > max_stock policy (not vs daily demand).",
+    )
+    balanced_days_pct: float = Field(
+        default=0.0,
+        description="% of mornings where reorder_point <= inventory <= max_stock.",
+    )
+    demand_relative_overstock_pct: float | None = Field(
+        default=None,
+        description="Legacy-style % of days where inventory > that day's demand (often high when holding multi-day cover).",
     )
     decision_latency_seconds: float = Field(
-        description="Wall seconds: latest decision.created_at − linked forecast.generated_at (capped).",
+        description="Audit lag in seconds: latest decision.created_at − linked forecast.generated_at (not UI wait time).",
     )
     rolling_backtest: RollingBacktestMetrics
     agentic_stockout_rate: float
@@ -43,6 +43,16 @@ class EvaluationMetrics(BaseModel):
         description="(baseline_sr − agentic_sr) / baseline_sr × 100; 0 if baseline_sr≈0 (no division).",
     )
     forecast_result_id: int | None = None
+    inventory_snapshot: float | None = Field(
+        default=None,
+        description="Opening on_hand+on_order used for the walk-forward inventory simulation.",
+    )
+    reorder_point: float | None = Field(default=None, description="Reorder point used in inventory simulation.")
+    avg_daily_demand: float | None = Field(default=None, description="Mean daily demand over evaluated history.")
+    zero_demand_days_pct: float | None = Field(
+        default=None,
+        description="% of history days with zero sales (high values inflate overstock %).",
+    )
     rolling_backtest_holiday: RollingBacktestMetrics | None = Field(
         default=None,
         description="Rolling Prophet backtest with is_holiday regressor when history includes holiday flags.",

@@ -1,38 +1,61 @@
-import { Outlet, useNavigate } from "react-router-dom";
-import { TopNavBar } from "./components/TopNavBar.jsx";
+import { useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
+import { ProfileMenu } from "./components/ProfileMenu.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 
 export default function App() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const role = user?.role;
-
   const canSimulate = role === "admin" || role === "store_manager";
-  const showUsers = role === "admin";
-  const showRegister = role === "admin";
+  const [navOpen, setNavOpen] = useState(false);
 
   const items = [
-    { to: "/", label: "Dashboard", show: true },
-    { to: "/products", label: "Products", show: true },
-    { to: "/sales", label: "Sales", show: true },
-    { to: "/agent-logs", label: "Agent Logs", show: true },
-    { to: "/evaluation", label: "Evaluation", show: true },
-    { to: "/simulation", label: "Simulation", show: canSimulate },
-    { to: "/users", label: "Users", show: showUsers },
-    { to: "/register", label: "Register user", show: showRegister },
-  ].filter((x) => x.show);
+    { to: "/", label: "Overview", end: true },
+    { to: "/sales", label: "Sales" },
+    { to: "/products", label: "Products" },
+    { to: "/associations", label: "Associations" },
+    { to: "/evaluation", label: "Evaluation" },
+    { to: "/simulation", label: "What-If", show: canSimulate },
+    { to: "/activity", label: "Activity" },
+  ].filter((x) => x.show !== false);
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", background: "#0f1419", color: "#e6edf3" }}>
-      <TopNavBar
-        items={items}
-        user={user}
-        onLogout={() => {
-          logout();
-          navigate("/login", { replace: true });
-        }}
-      />
-      <main style={{ padding: "1.5rem" }}>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-brand">
+          <strong>Retail Command Center</strong>
+          <span>Demand · associations · inventory decisions</span>
+        </div>
+
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-expanded={navOpen}
+          aria-controls="primary-nav"
+          onClick={() => setNavOpen((v) => !v)}
+        >
+          Menu
+        </button>
+
+        <nav id="primary-nav" className={`app-nav ${navOpen ? "is-open" : ""}`} aria-label="Primary">
+          {items.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) => (isActive ? "active" : undefined)}
+              onClick={() => setNavOpen(false)}
+            >
+              {n.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="app-header-actions">
+          <ProfileMenu />
+        </div>
+      </header>
+      <main className="app-main">
         <Outlet />
       </main>
     </div>

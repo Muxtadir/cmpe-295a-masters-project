@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { PasswordInput } from "../components/PasswordInput.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getRegisterInfo } from "../services/api.js";
 
@@ -306,22 +305,28 @@ export function RegisterPage() {
               disabled={submitting}
             />
           </label>
-          <PasswordInput
-            label="Password"
-            value={password}
-            onChange={setPassword}
-            disabled={submitting}
-            autoComplete="new-password"
-            marginBottom="0.75rem"
-          />
-          <PasswordInput
-            label="Confirm password"
-            value={confirm}
-            onChange={setConfirm}
-            disabled={submitting}
-            autoComplete="new-password"
-            marginBottom="0.75rem"
-          />
+          <label style={{ display: "block", color: "#8b949e", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+            Password
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={input}
+              disabled={submitting}
+            />
+          </label>
+          <label style={{ display: "block", color: "#8b949e", fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+            Confirm password
+            <input
+              type="password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              style={input}
+              disabled={submitting}
+            />
+          </label>
           {isAdmin && (
             <label style={{ display: "block", color: "#8b949e", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
               Role

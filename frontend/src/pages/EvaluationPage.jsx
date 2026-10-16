@@ -1,66 +1,68 @@
 import { useEffect, useMemo, useState } from "react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertBanner } from "../components/AlertBanner.jsx";
+import { BusinessMetricCard } from "../components/BusinessMetricCard.jsx";
 import { ChartContainer } from "../components/ChartContainer.jsx";
-import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
-import { getEvaluationWindowed, getForecastDimensions, getProducts } from "../services/api.js";
-import { pickBestForecastDimension } from "../utils/pickBestForecastDimension.js";
+import { EmptyState } from "../components/EmptyState.jsx";
+import { LoadingSkeleton } from "../components/LoadingSkeleton.jsx";
+import { PageHeader } from "../components/PageHeader.jsx";
+import { ProductSelector } from "../components/ProductSelector.jsx";
+import { StatusBadge } from "../components/StatusBadge.jsx";
+import { useForecastDimensions } from "../hooks/useForecastDimensions.js";
+import { getAssociationComparison, getEvaluationWindowed } from "../services/api.js";
+import { displayOrDash, fmtNumber, fmtPct } from "../utils/format.js";
+
+function MetricCompare({ label, standard, basket, deltaPct }) {
+  const improved = deltaPct != null && deltaPct < 0;
+  const worse = deltaPct != null && deltaPct > 0;
+  return (
+    <div className="card">
+      <div className="muted" style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        {label}
+      </div>
+      <div className="kpi-grid" style={{ marginTop: "0.55rem" }}>
+        <div>
+          <div className="muted" style={{ fontSize: "0.75rem" }}>
+            Standard
+          </div>
+          <strong style={{ fontSize: "1.15rem" }}>{displayOrDash(standard)}</strong>
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: "0.75rem" }}>
+            Basket-aware
+          </div>
+          <strong style={{ fontSize: "1.15rem" }}>{displayOrDash(basket)}</strong>
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: "0.75rem" }}>
+            Change
+          </div>
+          <strong
+            style={{
+              fontSize: "1.15rem",
+              color: improved ? "var(--success)" : worse ? "var(--danger)" : "var(--muted)",
+            }}
+          >
+            {deltaPct == null ? "—" : `${deltaPct > 0 ? "+" : ""}${Number(deltaPct).toFixed(1)}%`}
+          </strong>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function EvaluationPage() {
-  const [dimensions, setDimensions] = useState([]);
-  const [storeId, setStoreId] = useState("");
-  const [skus, setSkus] = useState([]);
-  const [sku, setSku] = useState("");
+  const { sku, setSku, skuOptions, bootstrapping, bootstrapError } = useForecastDimensions();
   const [windowDays, setWindowDays] = useState(7);
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
-  const storeQuery = useMemo(() => (storeId ? { store_id: storeId } : {}), [storeId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const dim = await getForecastDimensions();
-        if (!cancelled && Array.isArray(dim) && dim.length > 0) {
-          setDimensions(dim);
-          const best = pickBestForecastDimension(dim);
-          if (best) {
-            setStoreId(best.store_id);
-            setSku(best.sku);
-            setSkus(dim.filter((d) => d.store_id === best.store_id).map((d) => d.sku));
-          }
-          return;
-        }
-        const prods = await getProducts();
-        const safeRows = Array.isArray(prods) ? prods : [];
-        const list = safeRows.map((p) => p.sku);
-        if (!cancelled && list.length) {
-          setDimensions([]);
-          setStoreId("");
-          setSkus(list);
-          setSku(list[0]);
-        }
-      } catch (e) {
-        console.error("[Evaluation] bootstrap failed", e?.response?.status, e?.response?.data ?? e?.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!dimensions.length || !storeId) return;
-    const list = dimensions.filter((d) => d.store_id === storeId).map((d) => d.sku);
-    setSkus(list);
-    setSku((prev) => (list.includes(prev) ? prev : list[0] ?? ""));
-  }, [storeId, dimensions]);
+  const [cmp, setCmp] = useState(null);
+  const [cmpLoading, setCmpLoading] = useState(false);
+  const [cmpError, setCmpError] = useState(null);
 
   useEffect(() => {
     if (!sku) {
-      setLoading(false);
       setData(null);
       return;
     }
@@ -68,27 +70,11 @@ export function EvaluationPage() {
     (async () => {
       setLoading(true);
       setError(null);
-      setData(null);
-      console.log("[Evaluation] GET /evaluation before", { sku, storeId, window_days: windowDays, train_window: 30 });
       try {
-        const res = await getEvaluationWindowed(sku, {
-          window_days: windowDays,
-          train_window: 30,
-          ...storeQuery,
-        });
-        console.log("[Evaluation] GET /evaluation after", {
-          status: "ok",
-          sku: res?.sku,
-          metricsKeys: res?.metrics ? Object.keys(res.metrics) : [],
-          rolling: res?.metrics?.rolling_backtest,
-          seriesLen: Array.isArray(res?.actual_vs_forecast_last_n_days) ? res.actual_vs_forecast_last_n_days.length : 0,
-        });
+        const res = await getEvaluationWindowed(sku, { window_days: windowDays, train_window: 30 });
         if (!cancelled) setData(res ?? null);
       } catch (e) {
-        const detail = e?.response?.data?.detail;
-        const msg = typeof detail === "string" ? detail : e?.message || "Failed to load evaluation";
-        console.error("[Evaluation] GET /evaluation failed", e?.response?.status, msg, e?.response?.data);
-        if (!cancelled) setError(msg);
+        if (!cancelled) setError(e?.response?.data?.detail || e?.message || "Failed to load evaluation");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -96,11 +82,30 @@ export function EvaluationPage() {
     return () => {
       cancelled = true;
     };
-  }, [sku, windowDays, storeQuery]);
+  }, [sku, windowDays]);
 
-  const m = data?.metrics && typeof data.metrics === "object" ? data.metrics : {};
-  const rb = m.rolling_backtest && typeof m.rolling_backtest === "object" ? m.rolling_backtest : {};
-  const nWindows = Number(rb.n_windows ?? 0);
+  useEffect(() => {
+    if (!sku) {
+      setCmp(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setCmpLoading(true);
+      setCmpError(null);
+      try {
+        const res = await getAssociationComparison(sku, { window_days: windowDays, train_window: 30 });
+        if (!cancelled) setCmp(res);
+      } catch (e) {
+        if (!cancelled) setCmpError(e?.response?.data?.detail || e.message || "Comparison failed");
+      } finally {
+        if (!cancelled) setCmpLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sku, windowDays]);
 
   const series = useMemo(() => {
     const raw = Array.isArray(data?.actual_vs_forecast_last_n_days) ? data.actual_vs_forecast_last_n_days : [];
@@ -111,133 +116,149 @@ export function EvaluationPage() {
     }));
   }, [data]);
 
-  useEffect(() => {
-    if (series.length) {
-      console.log("[Evaluation] chart series sample", series.slice(0, 3));
-    } else if (!loading && data) {
-      console.log("[Evaluation] chart series empty", { nWindows, hint: "need train_window + window_days of daily sales" });
-    }
-  }, [series, loading, data, nWindows]);
-
-  const maeRolling = Number(rb.mae ?? 0);
-  const rmseRolling = Number(rb.rmse ?? 0);
-  const mapeRolling = Number(rb.mape ?? 0);
+  const maeDelta = cmp?.improvement_pct?.mae_pct;
+  const summary =
+    cmp == null
+      ? null
+      : !cmp.associations_available
+        ? "Basket-aware forecasting could not be compared for this product because no association signals were available — both sides match the standard forecast."
+        : maeDelta == null
+          ? "Comparison completed, but improvement percentage could not be computed."
+          : maeDelta < 0
+            ? `For this product, basket-aware forecasting improved MAE by ${Math.abs(maeDelta).toFixed(1)}%.`
+            : maeDelta > 0
+              ? `For this product, basket-aware forecasting did not improve MAE (error increased by ${maeDelta.toFixed(1)}%).`
+              : "For this product, no MAE improvement was observed.";
 
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>Evaluation</h1>
-      <p style={{ color: "#8b949e", maxWidth: 720, lineHeight: 1.5 }}>
-        Rolling-window backtest (Prophet) vs actual <strong>daily demand</strong> for the selected{" "}
-        <strong>store × SKU</strong> (Kaggle <code style={{ color: "#8b949e" }}>store_nbr</code> ×{" "}
-        <code style={{ color: "#8b949e" }}>item_nbr</code>), not product-family aggregates. MAE / RMSE / MAPE use
-        date-aligned points. Stockout / overstock use the same simulated daily ledger (inventory before demand vs
-        actual sales; lead-time replenishment).
-      </p>
-      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", alignItems: "end", flexWrap: "wrap" }}>
-        {dimensions.length > 0 && (
-          <label style={{ color: "#8b949e", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            {UI_LABEL_STORE_NBR}
-            <select
-              value={storeId}
-              onChange={(e) => setStoreId(e.target.value)}
-              style={{ ...selectStyle, minWidth: 120 }}
-            >
-              {[...new Set(dimensions.map((d) => d.store_id))]
-                .filter(Boolean)
-                .sort()
-                .map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+      <PageHeader
+        title="Does basket information improve forecasting?"
+        lead="Apples-to-apples comparison of standard time-series forecasting versus basket-aware forecasting on the same StockCode and windows."
+      />
+
+      {bootstrapping && <LoadingSkeleton label="Loading product catalog…" />}
+      {bootstrapError && <AlertBanner tone="danger">{bootstrapError}</AlertBanner>}
+
+      {!bootstrapping && (
+        <div className="control-row">
+          <ProductSelector options={skuOptions} value={sku} onChange={setSku} />
+          <label className="field">
+            Test window
+            <select className="select" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))} style={{ minWidth: 120 }}>
+              {[7, 14, 30].map((w) => (
+                <option key={w} value={w}>
+                  {w} days
+                </option>
+              ))}
             </select>
           </label>
-        )}
-        <div style={{ width: 260 }}>
-          <SKUSelector value={sku} skus={skus} onChange={setSku} />
-        </div>
-        <label style={{ color: "#8b949e" }}>
-          Window
-          <select value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))} style={{ ...selectStyle, marginLeft: "0.5rem" }}>
-            {[7, 14, 30].map((w) => (
-              <option key={w} value={w}>
-                {w} days
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {!sku && <div style={{ color: "#8b949e" }}>Load sales data (Kaggle ingest) or demo seed to choose a SKU.</div>}
-      {loading && sku && <div style={{ color: "#8b949e" }}>Loading evaluation…</div>}
-      {error && (
-        <div style={{ color: "#f85149", marginTop: "0.5rem", lineHeight: 1.45 }}>
-          {error}
         </div>
       )}
 
-      {!loading && !error && !data && (
-        <div style={{ color: "#8b949e", marginTop: "0.5rem" }}>
-          No evaluation data returned. Try another SKU or confirm the API is reachable.
-        </div>
+      {!bootstrapping && !sku && (
+        <EmptyState title="No product selected" description="Choose a StockCode to run the research comparison." />
+      )}
+
+      {loading && sku && <LoadingSkeleton label="Running rolling backtest…" variant="chart" />}
+      {error && <AlertBanner tone="danger">{error}</AlertBanner>}
+
+      {cmpLoading && <LoadingSkeleton label="Comparing standard vs basket-aware forecasts…" />}
+      {cmpError && <AlertBanner tone="warning">{String(cmpError)}</AlertBanner>}
+
+      {!cmpLoading && cmp && (
+        <section className="section">
+          <div className="section-head">
+            <h2>Standard forecast vs basket-aware forecast</h2>
+            <StatusBadge
+              label={cmp.associations_available ? "Association signals used" : "No association signals"}
+              tone={cmp.associations_available ? "info" : "neutral"}
+            />
+          </div>
+          {summary && <AlertBanner tone={maeDelta != null && maeDelta < 0 ? "info" : "muted"}>{summary}</AlertBanner>}
+          <div className="compare-grid">
+            <MetricCompare
+              label="MAE"
+              standard={cmp.baseline?.n_windows > 0 ? fmtNumber(cmp.baseline.mae, 2) : null}
+              basket={cmp.association_aware?.n_windows > 0 ? fmtNumber(cmp.association_aware.mae, 2) : null}
+              deltaPct={cmp.improvement_pct?.mae_pct}
+            />
+            <MetricCompare
+              label="RMSE"
+              standard={cmp.baseline?.n_windows > 0 ? fmtNumber(cmp.baseline.rmse, 2) : null}
+              basket={cmp.association_aware?.n_windows > 0 ? fmtNumber(cmp.association_aware.rmse, 2) : null}
+              deltaPct={cmp.improvement_pct?.rmse_pct}
+            />
+            <MetricCompare
+              label="MAPE"
+              standard={cmp.baseline?.n_windows > 0 ? fmtPct(cmp.baseline.mape, 1) : null}
+              basket={cmp.association_aware?.n_windows > 0 ? fmtPct(cmp.association_aware.mape, 1) : null}
+              deltaPct={cmp.improvement_pct?.mape_pct}
+            />
+          </div>
+
+          <div className="kpi-grid" style={{ marginTop: "0.85rem" }}>
+            <BusinessMetricCard
+              label="Stockout rate (sim.)"
+              value={cmp.baseline?.stockout_rate != null ? fmtPct(cmp.baseline.stockout_rate, 1) : null}
+              tooltip="Share of simulated days where demand exceeded available inventory (same path for both models in current experiment)."
+            />
+            <BusinessMetricCard
+              label="Overstock (sim.)"
+              value={cmp.baseline?.overstock_percentage != null ? fmtPct(cmp.baseline.overstock_percentage, 1) : null}
+              tooltip="Share of simulated days above max-stock policy."
+            />
+            <BusinessMetricCard
+              label="Related products used"
+              value={cmp.associations_available ? String(cmp.related_skus_used?.length ?? 0) : null}
+              missingLabel="None"
+            />
+          </div>
+
+          {Array.isArray(cmp.related_skus_used) && cmp.related_skus_used.length > 0 ? (
+            <div className="card" style={{ marginTop: "0.85rem" }}>
+              <h3 className="card-title">Signals fed into basket-aware forecast</h3>
+              <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--muted)" }}>
+                {cmp.related_skus_used.map((r) => (
+                  <li key={r.sku || r.regressor}>
+                    {r.sku}
+                    {r.lift != null ? ` · Lift ${Number(r.lift).toFixed(2)}×` : ""}
+                    {r.confidence != null ? ` · Confidence ${fmtPct(Number(r.confidence) * 100, 0)}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
       )}
 
       {!loading && !error && data && (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem" }}>
-            <MetricCard label="MAE (rolling)" value={nWindows > 0 ? maeRolling.toFixed(2) : "—"} />
-            <MetricCard label="RMSE (rolling)" value={nWindows > 0 ? rmseRolling.toFixed(2) : "—"} />
-            <MetricCard label="MAPE (rolling)" value={nWindows > 0 ? `${mapeRolling.toFixed(2)}%` : "—"} />
-            <MetricCard label="Overstock (period %)" value={`${Number(m.overstock_percentage ?? 0).toFixed(2)}%`} />
-            <MetricCard label="Stockout (period %)" value={`${Number(m.stockout_rate ?? 0).toFixed(2)}%`} />
-            <MetricCard label="Backtest windows" value={String(nWindows)} />
-            <MetricCard label="Stockout vs baseline (%)" value={`${Number(m.improvement_percent ?? 0).toFixed(2)}%`} />
-            <MetricCard
-              label="Forecast → decision (latest)"
-              value={
-                Number(m.decision_latency_seconds) > 0
-                  ? `${Number(m.decision_latency_seconds).toFixed(2)}s`
-                  : "—"
-              }
+        <section className="section">
+          <div className="section-head">
+            <h2>Rolling backtest chart</h2>
+          </div>
+          {series.length > 0 ? (
+            <ChartContainer title="Actual vs forecast (aligned window)" meta="Values come from the evaluation API — not fabricated.">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={series}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                  <XAxis dataKey="ds" tick={{ fill: "var(--muted)", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "var(--muted)", fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: "#0f161e", border: "1px solid var(--border)" }} />
+                  <Legend />
+                  <Line type="monotone" dataKey="actual" stroke="#d4a017" dot={false} name="Actual" />
+                  <Line type="monotone" dataKey="forecast" stroke="#5b9fd4" dot={false} name="Forecast" />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          ) : (
+            <EmptyState
+              title="Evaluation requires additional historical observations"
+              description="Pick a StockCode with enough distinct sale days for a rolling backtest."
             />
-          </div>
-          {nWindows === 0 && (
-            <div style={{ color: "#d29922", marginTop: "0.75rem", lineHeight: 1.5, maxWidth: 720 }}>
-              Rolling backtest did not run: need at least <strong>train_window + window_days</strong> distinct daily sales
-              points (default 30 + 7 = 37). Add more history for this SKU or lower window size in the API query.
-            </div>
           )}
-          <div style={{ marginTop: "1rem" }}>
-            {series.length > 0 ? (
-              <ChartContainer title="Actual vs forecast (rolling alignment)">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series}>
-                    <CartesianGrid stroke="#30363d" strokeDasharray="3 3" />
-                    <XAxis dataKey="ds" tick={{ fill: "#8b949e", fontSize: 11 }} />
-                    <YAxis tick={{ fill: "#8b949e", fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d" }} />
-                    <Line type="monotone" dataKey="actual" stroke="#d29922" dot={false} name="Actual" />
-                    <Line type="monotone" dataKey="forecast" stroke="#58a6ff" dot={false} name="Forecast" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            ) : (
-              <div style={{ color: "#8b949e", lineHeight: 1.5 }}>
-                No chart data: rolling series is empty. If metrics above are zero, confirm sales exist for this SKU and
-                try a smaller window (e.g. 7 days) with enough daily observations.
-              </div>
-            )}
-          </div>
-        </>
+        </section>
       )}
     </div>
   );
 }
-
-const selectStyle = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
-  borderRadius: 6,
-  padding: "0.35rem",
-};

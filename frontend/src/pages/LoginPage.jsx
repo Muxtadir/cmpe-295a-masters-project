@@ -74,15 +74,26 @@ export function LoginPage() {
         alignItems: "center",
         justifyContent: "center",
         padding: "1.5rem",
-        fontFamily: "'Segoe UI', system-ui, sans-serif",
-        color: "#e6edf3",
+        fontFamily: "var(--font)",
+        color: "var(--text)",
       }}
     >
       <div style={card}>
         <div style={{ marginBottom: "1.5rem" }}>
+          <div
+            style={{
+              color: "var(--muted)",
+              fontSize: "0.78rem",
+              marginBottom: "0.35rem",
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            Retail Command Center
+          </div>
           <h1 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 600 }}>Sign in</h1>
-          <p style={{ margin: "0.5rem 0 0", color: "#8b949e", fontSize: "0.9rem", lineHeight: 1.5 }}>
-            Agentic Retail Operations — secure access to forecasts, inventory, and audit logs.
+          <p style={{ margin: "0.5rem 0 0", color: "var(--muted)", fontSize: "0.9rem", lineHeight: 1.5 }}>
+            Demand outlook, product associations, and inventory recommendations for retail operations.
           </p>
         </div>
         <form onSubmit={onSubmit}>

@@ -17,6 +17,7 @@ export default defineConfig({
       "/inventory": { target: api, changeOrigin: true },
       "/evaluation": { target: api, changeOrigin: true },
       "/products": { target: api, changeOrigin: true },
+      "/associations": { target: api, changeOrigin: true },
       "/analytics": { target: api, changeOrigin: true },
       "/agent-logs": { target: api, changeOrigin: true },
       "/simulate-disruption": { target: api, changeOrigin: true },

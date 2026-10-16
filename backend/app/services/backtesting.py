@@ -89,7 +89,8 @@ def rolling_backtest(
     series_points: list[dict[str, float | str]] = []
     n_windows = 0
 
-    max_windows = 8
+    # Cap walk-forward folds — each fold fits Prophet; more windows = large UI latency.
+    max_windows = 3
     for train_end in range(train_window, len(df) - window_days + 1, window_days):
         if n_windows >= max_windows:
             break

@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { MetricCard } from "../components/MetricCard.jsx";
+import { Link, useParams } from "react-router-dom";
+import { AlertBanner } from "../components/AlertBanner.jsx";
+import { BusinessMetricCard } from "../components/BusinessMetricCard.jsx";
+import { EmptyState } from "../components/EmptyState.jsx";
 import { JSONViewer } from "../components/JSONViewer.jsx";
+import { LoadingSkeleton } from "../components/LoadingSkeleton.jsx";
+import { PageHeader } from "../components/PageHeader.jsx";
+import { StatusBadge } from "../components/StatusBadge.jsx";
 import { getProductDetail } from "../services/api.js";
+import { fmtNumber } from "../utils/format.js";
 
 export function ProductDetailPage() {
   const { sku } = useParams();
@@ -11,39 +17,90 @@ export function ProductDetailPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      setLoading(true);
+      setError(null);
       try {
-        setDetail(await getProductDetail(sku));
+        const data = await getProductDetail(sku, {});
+        if (!cancelled) setDetail(data);
       } catch (e) {
-        setError(e?.response?.data?.detail || e.message);
+        if (!cancelled) setError(e?.response?.data?.detail || e.message);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [sku]);
 
-  if (loading) return <div style={{ color: "#8b949e" }}>Loading SKU detail…</div>;
-  if (error) return <div style={{ color: "#f85149" }}>{String(error)}</div>;
+  if (loading) return <LoadingSkeleton label="Loading product intelligence…" />;
+  if (error) {
+    return (
+      <div>
+        <AlertBanner tone="danger">{String(error)}</AlertBanner>
+        <Link to="/products">← Back to products</Link>
+      </div>
+    );
+  }
 
   const inv = detail?.inventory;
+  const last = detail?.last_inventory_decision;
+
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>SKU (Item ID) — {sku}</h1>
-      <p style={{ color: "#8b949e", fontSize: "0.9rem", maxWidth: 640, lineHeight: 1.5 }}>
-        Kaggle <code style={{ color: "#8b949e" }}>item_nbr</code> as SKU. Forecasts in this app are trained and served at{" "}
-        <strong>store × SKU</strong> granularity (pass <code style={{ color: "#8b949e" }}>store_id</code> query param to
-        the API for store-specific posture); product categories in <code style={{ color: "#8b949e" }}>items.csv</code> are
-        not used by the forecasting model.
+      <p className="muted" style={{ marginTop: 0 }}>
+        <Link to="/products">Products</Link>
+        {" · "}
+        <Link to="/">Open in Overview</Link>
       </p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "0.75rem" }}>
-        <MetricCard label="On hand" value={inv?.quantity_on_hand ?? 0} />
-        <MetricCard label="On order" value={inv?.quantity_on_order ?? 0} />
-        <MetricCard label="Lead time" value={`${inv?.lead_time_days ?? 0}d`} />
-        <MetricCard label="Safety stock" value={inv?.safety_stock ?? 0} />
-        <MetricCard label="Forecast next 7d" value={Number(detail?.forecast_next_7d_total ?? 0).toFixed(2)} />
-      </div>
-      <h3 style={{ marginTop: "1rem" }}>Last inventory decision</h3>
-      <JSONViewer data={detail?.last_inventory_decision} />
+      <PageHeader
+        title={detail?.description || sku}
+        lead={`StockCode ${sku}. Inventory posture and the latest recommended action from the decision service.`}
+      />
+
+      {!inv ? (
+        <EmptyState title="Inventory information unavailable" description="No inventory record could be created for this StockCode." />
+      ) : (
+        <>
+          <div style={{ marginBottom: "0.75rem" }}>
+            <StatusBadge
+              label={
+                last?.recommended_order_quantity > 0
+                  ? "Reorder previously recommended"
+                  : "Latest decision: no order"
+              }
+              tone={last?.recommended_order_quantity > 0 ? "warning" : "success"}
+            />
+          </div>
+          <div className="kpi-grid">
+            <BusinessMetricCard label="On hand" value={inv.quantity_on_hand != null ? `${inv.quantity_on_hand} units` : null} />
+            <BusinessMetricCard label="On order" value={inv.quantity_on_order != null ? `${inv.quantity_on_order} units` : null} />
+            <BusinessMetricCard label="Lead time" value={inv.lead_time_days != null ? `${inv.lead_time_days} days` : null} />
+            <BusinessMetricCard label="Safety stock" value={inv.safety_stock != null ? `${inv.safety_stock} units` : null} />
+            <BusinessMetricCard
+              label="Forecast next 7d"
+              value={detail?.forecast_next_7d_total != null ? fmtNumber(detail.forecast_next_7d_total, 1) : null}
+            />
+            <BusinessMetricCard label="Reorder point" value={inv.reorder_point != null ? `${inv.reorder_point}` : null} />
+          </div>
+        </>
+      )}
+
+      <section className="section">
+        <div className="section-head">
+          <h2>Last inventory decision</h2>
+        </div>
+        {last ? (
+          <details className="expandable" open>
+            <summary>View technical details</summary>
+            <JSONViewer data={last} />
+          </details>
+        ) : (
+          <EmptyState title="No recommendation stored yet" description="Generate one from Overview or What-If Planning." />
+        )}
+      </section>
     </div>
   );
 }

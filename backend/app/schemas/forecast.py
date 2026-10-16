@@ -16,11 +16,8 @@ class ForecastPoint(BaseModel):
 
 
 class ForecastResponse(BaseModel):
-    sku: str = Field(description="Kaggle item_nbr as string.")
-    store_id: str | None = Field(
-        default=None,
-        description="Kaggle store_nbr as string; daily forecast for this store × SKU.",
-    )
+    sku: str
+    store_id: str | None = None
     model_name: str
     horizon_days: int
     forecast_result_id: int | None = None

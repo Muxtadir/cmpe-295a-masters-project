@@ -20,10 +20,13 @@ from app.database import Base, engine
 from app.limiter import limiter
 from app.models import (  # noqa: F401 - register metadata
     AgentLog,
+    BasketTransaction,
     EvaluationMetric,
     ForecastResult,
     InventoryDecision,
     InventoryRecord,
+    ProductAssociation,
+    ProductCatalog,
     SalesHistory,
     User,
 )

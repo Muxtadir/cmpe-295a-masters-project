@@ -43,27 +43,30 @@ def daily_sales_dataframe_from_rows(sales_rows: list[Any]) -> pd.DataFrame:
 
 
 def ensure_daily_aggregated_sales(sales_df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate duplicate dates by summing ``y``; ``is_holiday`` uses max if present."""
+    """Aggregate duplicate dates by summing ``y``; preserve holiday + extra regressors.
+
+    Extra numeric columns (e.g. ``assoc_demand_*`` from association-aware forecasting)
+    are averaged within the day so Prophet regressors are not silently dropped.
+    """
     if sales_df.empty:
         return sales_df
     df = sales_df.copy()
     df["ds"] = pd.to_datetime(df["ds"])
     df["y"] = pd.to_numeric(df["y"], errors="coerce").fillna(0.0)
-    has_h = "is_holiday" in df.columns
-    if has_h:
+    reserved = {"ds", "y", "is_holiday"}
+    extra_cols = [c for c in df.columns if c not in reserved]
+    agg: dict[str, str] = {"y": "sum"}
+    if "is_holiday" in df.columns:
         df["is_holiday"] = pd.to_numeric(df["is_holiday"], errors="coerce").fillna(0).astype(int).clip(0, 1)
-        out = (
-            df.groupby(df["ds"].dt.normalize(), as_index=False)
-            .agg(y=("y", "sum"), is_holiday=("is_holiday", "max"))
-            .sort_values("ds")
-            .reset_index(drop=True)
-        )
-    else:
-        out = (
-            df.groupby(df["ds"].dt.normalize(), as_index=False)["y"]
-            .sum()
-            .sort_values("ds")
-            .reset_index(drop=True)
-        )
+        agg["is_holiday"] = "max"
+    for c in extra_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+        agg[c] = "mean"
+    out = (
+        df.groupby(df["ds"].dt.normalize(), as_index=False)
+        .agg(agg)
+        .sort_values("ds")
+        .reset_index(drop=True)
+    )
     out["ds"] = pd.to_datetime(out["ds"])
     return out

@@ -1,6 +1,5 @@
 /**
- * Prefer a (store, sku) with enough daily history for Prophet (≥30 distinct sale dates).
- * API returns dimensions sorted by distinct_sale_days DESC; we still pick explicitly for robustness.
+ * Prefer a StockCode with enough daily history for Prophet (≥30 distinct sale dates).
  */
 export function pickBestForecastDimension(dimensions) {
   if (!Array.isArray(dimensions) || dimensions.length === 0) return null;

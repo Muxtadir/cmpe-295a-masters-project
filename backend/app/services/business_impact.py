@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
@@ -10,18 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models.forecast_result import ForecastResult
-from app.models.inventory_decision import InventoryDecision
 from app.models.inventory_record import InventoryRecord
 from app.models.sales_history import SalesHistory
-from app.services.evaluation import relative_stockout_improvement_percent
-from app.services.forecast_queries import select_latest_forecast_result
-from app.services.inventory_alignment import (
-    aggregate_inventory_policy_params,
-    baseline_order_up_to_level,
-    compute_initial_on_hand_for_simulation,
-    decision_quantities_per_sale_day,
-    simulate_daily_inventory_metrics,
+from app.services.evaluation import (
+    period_stockout_rate_pct,
+    relative_stockout_improvement_percent,
 )
+from app.services.forecast_queries import select_latest_forecast_result
+from app.services.inventory_alignment import aggregate_inventory_position_and_reorder_point
 from app.services.sales_timeseries import daily_sales_dataframe_from_rows
 import pandas as pd
 
@@ -67,43 +62,12 @@ def compute_business_impact(
     inv_rows = db.execute(inv_stmt).scalars().all()
     inventory_levels = [float(r.quantity_on_hand + r.quantity_on_order) for r in inv_rows] if inv_rows else []
 
-    dec_stmt = select(InventoryDecision).where(InventoryDecision.sku == sku)
-    if store_id is not None:
-        dec_stmt = dec_stmt.where(InventoryDecision.store_id == store_id)
-    else:
-        dec_stmt = dec_stmt.where(InventoryDecision.store_id.is_(None))
-    decision_rows = db.execute(dec_stmt.order_by(InventoryDecision.created_at.asc())).scalars().all()
-
-    policy = aggregate_inventory_policy_params(list(inv_rows))
-    baseline_order_up_to_S = baseline_order_up_to_level(policy)
-    lead_days_sim = max(1, int(round(policy["lead_time_days"])))
-
+    inv_snap, baseline_reorder_point = aggregate_inventory_position_and_reorder_point(list(inv_rows))
     actual = sales_df["y"].astype(float).tolist() if not sales_df.empty else []
-    initial_sim_inv = compute_initial_on_hand_for_simulation(policy, actual)
-
-    sales_day_objs = [SimpleNamespace(sale_date=d) for d in sales_df["ds"].tolist()] if not sales_df.empty else []
-    orders_agent = decision_quantities_per_sale_day(sales_day_objs, list(decision_rows))
-    if len(orders_agent) < len(actual):
-        orders_agent = orders_agent + [0.0] * (len(actual) - len(orders_agent))
-    elif len(orders_agent) > len(actual):
-        orders_agent = orders_agent[: len(actual)]
-
-    baseline_sr, _ = simulate_daily_inventory_metrics(
-        actual,
-        lead_time_days=lead_days_sim,
-        initial_on_hand=initial_sim_inv,
-        sku=sku,
-        track_label="business_panel_baseline",
-        order_up_to_target=baseline_order_up_to_S,
-    )
-    agentic_sr, _ = simulate_daily_inventory_metrics(
-        actual,
-        lead_time_days=lead_days_sim,
-        initial_on_hand=initial_sim_inv,
-        sku=sku,
-        track_label="business_panel_agent",
-        orders_fixed=orders_agent,
-    )
+    inv_avail = [inv_snap] * len(actual)
+    baseline_inv_proxy = [baseline_reorder_point] * len(actual)
+    baseline_sr = period_stockout_rate_pct(actual, baseline_inv_proxy)
+    agentic_sr = period_stockout_rate_pct(actual, inv_avail)
     improvement_pct = relative_stockout_improvement_percent(baseline_sr, agentic_sr)
 
     stockout_loss_avoided = None

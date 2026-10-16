@@ -97,6 +97,88 @@ def period_overstock_rate_pct(demand: list[float] | np.ndarray, inventory_availa
     return float(np.mean(mask) * 100.0)
 
 
+def period_balanced_rate_pct(
+    inventory_available: list[float] | np.ndarray,
+    *,
+    reorder_point: float,
+    max_stock: float,
+) -> float:
+    """Share of mornings where inventory sits in the policy band [ROP, max_stock]."""
+    inv = _to_float_array(inventory_available)
+    if len(inv) == 0:
+        return 0.0
+    lo = float(reorder_point)
+    hi = max(lo, float(max_stock))
+    mask = (inv >= lo) & (inv <= hi)
+    return float(np.mean(mask) * 100.0)
+
+
+def period_policy_overstock_rate_pct(
+    inventory_available: list[float] | np.ndarray,
+    *,
+    max_stock: float,
+) -> float:
+    """
+    Policy overstock: share of mornings where inventory_available > max_stock.
+
+    Prefer this over comparing inventory to *daily* demand — holding multi-day cover
+    would otherwise look like ~100% overstock every day.
+    """
+    inv = _to_float_array(inventory_available)
+    if len(inv) == 0:
+        return 0.0
+    hi = float(max_stock)
+    mask = inv > hi
+    return float(np.mean(mask) * 100.0)
+
+
+def simulate_daily_inventory_available(
+    demand: list[float],
+    *,
+    opening_inventory: float,
+    reorder_point: float,
+    order_up_to: float,
+) -> list[float]:
+    """
+    Walk-forward inventory path for evaluation.
+
+    Each day records inventory **before** demand is applied. After demand, if position
+    falls below ``reorder_point``, overnight replenishment brings stock up to ``order_up_to``.
+
+    This is much more realistic than repeating today's on-hand snapshot for every past day.
+    """
+    if not demand:
+        return []
+    inv = max(0.0, float(opening_inventory))
+    rop = max(0.0, float(reorder_point))
+    target = max(rop, float(order_up_to))
+    out: list[float] = []
+    for raw in demand:
+        d = max(0.0, float(raw))
+        out.append(inv)
+        inv = max(0.0, inv - d)
+        if inv < rop:
+            inv = target
+    return out
+
+
+def demand_context_stats(demand: list[float]) -> dict[str, float]:
+    """Small helpers so UI can explain stockout/overstock without guessing."""
+    if not demand:
+        return {
+            "avg_daily_demand": 0.0,
+            "zero_demand_days_pct": 0.0,
+            "n_days": 0.0,
+        }
+    arr = _to_float_array(demand)
+    zero_pct = float(np.mean(arr == 0.0) * 100.0)
+    return {
+        "avg_daily_demand": float(np.mean(arr)),
+        "zero_demand_days_pct": zero_pct,
+        "n_days": float(len(arr)),
+    }
+
+
 def log_inventory_period_debug(
     sku: str,
     demand: list[float],

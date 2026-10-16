@@ -193,8 +193,8 @@ export async function getAnalyticsLongTail(params = {}) {
   return data;
 }
 
-export async function getProductDetail(sku) {
-  const { data } = await client.get(`/products/${encodeURIComponent(sku)}`);
+export async function getProductDetail(sku, params = {}) {
+  const { data } = await client.get(`/products/${encodeURIComponent(sku)}`, { params });
   return data;
 }
 
@@ -210,6 +210,27 @@ export async function getAgentLogs(params = {}) {
 
 export async function getEvaluationWindowed(sku, params = {}) {
   const { data } = await client.get(`/evaluation/${encodeURIComponent(sku)}`, { params });
+  return data;
+}
+
+export async function getAssociationComparison(sku, params = {}) {
+  const { data } = await client.get(`/evaluation/${encodeURIComponent(sku)}/association-comparison`, { params });
+  return data;
+}
+
+export async function getAssociationsForSku(sku, params = {}) {
+  const { data } = await client.get(`/associations/${encodeURIComponent(sku)}`, { params });
+  return data;
+}
+
+/** StockCodes that appear in at least one persisted association rule. */
+export async function getSkusWithAssociationRules() {
+  const { data } = await client.get("/associations/skus-with-rules");
+  return Array.isArray(data?.skus) ? data.skus : [];
+}
+
+export async function postGenerateAssociations(body = {}) {
+  const { data } = await client.post("/associations/generate", body);
   return data;
 }
 

@@ -1,16 +1,41 @@
+# Python / backend runtime
 backend/.venv/
-backend/**/__pycache__/
+.venv/
+**/__pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+**/.pytest_cache/
+
+# Frontend build / deps
 frontend/node_modules/
 frontend/dist/
+
+# Secrets — keep .env.example tracked
 .env
 backend/.env
+**/.env
+!**/.env.example
+!backend/.env.example
 
-# Local / generated — do not push
-.DS_Store
-**/.DS_Store
+# Local / generated databases
 backend/dev.db
 *.db
+*.sqlite
+*.sqlite3
 
-# Kaggle training extract — multi‑GB; obtain via scripts/load_kaggle_dataset.py or Kaggle
+# OS / editor noise
+.DS_Store
+**/.DS_Store
+
+# Raw retail datasets (obtain locally; do not commit)
+# Favorita Kaggle extract — multi-GB
 backend/data/train.csv
+# Online Retail II workbook — use scripts/load_online_retail_ii.py after placing locally
+backend/data/online_retail_II.xlsx
+backend/data/*.xlsx
+backend/data/*.xls
+# Catch other large dumps if dropped under data/
+backend/data/*.csv.gz
+backend/data/*.zip
+backend/data/*.parquet

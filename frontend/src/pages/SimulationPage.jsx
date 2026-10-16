@@ -1,71 +1,40 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { AlertBanner } from "../components/AlertBanner.jsx";
+import { BusinessMetricCard } from "../components/BusinessMetricCard.jsx";
+import { EmptyState } from "../components/EmptyState.jsx";
 import { JSONViewer } from "../components/JSONViewer.jsx";
-import { MetricCard } from "../components/MetricCard.jsx";
-import { SKUSelector, UI_LABEL_STORE_NBR } from "../components/SKUSelector.jsx";
+import { LoadingSkeleton } from "../components/LoadingSkeleton.jsx";
+import { PageHeader } from "../components/PageHeader.jsx";
+import { ProductSelector } from "../components/ProductSelector.jsx";
+import { StatusBadge } from "../components/StatusBadge.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { getForecastDimensions, getProducts, postSimulateDisruption } from "../services/api.js";
-import { pickBestForecastDimension } from "../utils/pickBestForecastDimension.js";
+import { useForecastDimensions } from "../hooks/useForecastDimensions.js";
+import { postSimulateDisruption } from "../services/api.js";
+import { displayOrDash, fmtUnits } from "../utils/format.js";
 
 export function SimulationPage() {
   const { user } = useAuth();
-  const [dimensions, setDimensions] = useState([]);
-  const [storeId, setStoreId] = useState("");
-  const [skus, setSkus] = useState([]);
-  const [sku, setSku] = useState("");
+  const { sku, setSku, skuOptions, bootstrapping, bootstrapError } = useForecastDimensions();
+  const [demandPct, setDemandPct] = useState(20);
   const [lead, setLead] = useState(20);
-  const [demandMult, setDemandMult] = useState(1.2);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [running, setRunning] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const dim = await getForecastDimensions();
-        if (Array.isArray(dim) && dim.length > 0) {
-          setDimensions(dim);
-          const best = pickBestForecastDimension(dim);
-          if (best) {
-            setStoreId(best.store_id);
-            setSku(best.sku);
-            setSkus(dim.filter((d) => d.store_id === best.store_id).map((d) => d.sku));
-          }
-          return;
-        }
-        const p = await getProducts();
-        const safeRows = Array.isArray(p) ? p : [];
-        const list = safeRows.map((x) => x.sku);
-        if (list.length) {
-          setDimensions([]);
-          setStoreId("");
-          setSkus(list);
-          setSku(list[0]);
-        }
-      } catch (e) {
-        console.error("Failed to load products for Simulation page", e);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!dimensions.length || !storeId) return;
-    const list = dimensions.filter((d) => d.store_id === storeId).map((d) => d.sku);
-    setSkus(list);
-    setSku((prev) => (list.includes(prev) ? prev : list[0] ?? ""));
-  }, [storeId, dimensions]);
+  const multiplier = useMemo(() => 1 + Number(demandPct) / 100, [demandPct]);
 
   const run = async () => {
     setError(null);
     setRunning(true);
     try {
-      const payload = {
-        sku,
-        store_id: storeId || undefined,
-        disruption_lead_time_days: lead,
-        demand_multiplier: demandMult,
-      };
-      setResult(await postSimulateDisruption(payload));
+      setResult(
+        await postSimulateDisruption({
+          sku,
+          disruption_lead_time_days: lead,
+          demand_multiplier: multiplier,
+        }),
+      );
     } catch (e) {
       const d = e?.response?.data?.detail;
       setResult(null);
@@ -79,96 +48,128 @@ export function SimulationPage() {
     return <Navigate to="/" replace />;
   }
 
+  const before = result?.before;
+  const after = result?.after;
+  const beforeQty = before?.recommended_order_quantity;
+  const afterQty = after?.recommended_order_quantity;
+  const beforeLead = before?.explanation?.lead_time_days_effective;
+  const afterLead = after?.explanation?.lead_time_days_effective;
+  const beforeDemand = before?.explanation?.lead_time_demand_estimate;
+  const afterDemand = after?.explanation?.lead_time_demand_estimate;
+
+  const why =
+    before && after
+      ? `The simulated plan scales forecast demand by ${multiplier.toFixed(2)}× (+${demandPct}%) and sets effective lead time to ${lead} days. Recommended order moved from ${beforeQty ?? "—"} to ${afterQty ?? "—"} units because projected inventory after lead-time demand ${
+          after?.explanation?.projected_position_after_lead_time != null
+            ? `(${Number(after.explanation.projected_position_after_lead_time).toFixed(0)})`
+            : ""
+        } is compared against safety stock under the longer delay.`
+      : null;
+
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>What-if simulation</h1>
-      <p style={{ color: "#8b949e", maxWidth: 720, lineHeight: 1.5 }}>
-        Compare a baseline recommendation (nominal demand, no disruption override) to a stressed scenario: scaled forecast
-        demand and an explicit lead-time disruption. Each run is written to the audit log.
-      </p>
-      <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", flexWrap: "wrap" }}>
-        {dimensions.length > 0 && (
-          <label style={{ color: "#8b949e", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            {UI_LABEL_STORE_NBR}
-            <select
-              value={storeId}
-              onChange={(e) => setStoreId(e.target.value)}
-              style={{ ...inputStyle, minWidth: 120 }}
-            >
-              {[...new Set(dimensions.map((d) => d.store_id))]
-                .filter(Boolean)
-                .sort()
-                .map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-            </select>
-          </label>
-        )}
-        <div style={{ width: 260 }}>
-          <SKUSelector skus={skus} value={sku} onChange={setSku} />
+      <PageHeader
+        title="What-if planning"
+        lead="See how changes in demand or supplier delays affect inventory recommendations."
+      />
+
+      {bootstrapping && <LoadingSkeleton label="Loading product catalog…" />}
+      {bootstrapError && <AlertBanner tone="danger">{bootstrapError}</AlertBanner>}
+
+      {!bootstrapping && (
+        <div className="card" style={{ marginBottom: "1rem" }}>
+          <div className="control-row" style={{ marginBottom: 0 }}>
+            <ProductSelector options={skuOptions} value={sku} onChange={setSku} />
+            <label className="field">
+              Demand change
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  className="input"
+                  type="number"
+                  min="-50"
+                  max="200"
+                  step="5"
+                  value={demandPct}
+                  onChange={(e) => setDemandPct(Number(e.target.value))}
+                  style={{ width: 90 }}
+                />
+                <span className="muted">% → ×{multiplier.toFixed(2)}</span>
+              </div>
+            </label>
+            <label className="field">
+              Supplier lead time (days)
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={lead}
+                onChange={(e) => setLead(Number(e.target.value))}
+                style={{ width: 100 }}
+              />
+            </label>
+            <button type="button" className="btn btn-primary" onClick={run} disabled={running || !sku}>
+              {running ? "Computing…" : "Run scenario"}
+            </button>
+          </div>
         </div>
-        <label style={{ color: "#8b949e" }}>
-          Demand multiplier
-          <input
-            type="number"
-            min="0.1"
-            max="5"
-            step="0.05"
-            value={demandMult}
-            onChange={(e) => setDemandMult(Number(e.target.value))}
-            style={{ ...inputStyle, marginLeft: "0.5rem", width: 100 }}
-          />
-        </label>
-        <label style={{ color: "#8b949e" }}>
-          Scenario lead time (days)
-          <input
-            type="number"
-            min="1"
-            value={lead}
-            onChange={(e) => setLead(Number(e.target.value))}
-            style={{ ...inputStyle, marginLeft: "0.5rem", width: 100 }}
-          />
-        </label>
-        <button style={{ ...btnStyle, opacity: running || !sku ? 0.75 : 1 }} onClick={run} disabled={running || !sku}>
-          {running ? "Computing…" : "Run scenario"}
-        </button>
-      </div>
-      {error && <div style={{ color: "#f85149", marginTop: "0.75rem" }}>{error}</div>}
+      )}
+
+      {error && <AlertBanner tone="danger">{error}</AlertBanner>}
+      {running && <LoadingSkeleton label="Calculating inventory recommendation under stress…" />}
+
+      {!running && !result && !error && sku && (
+        <EmptyState title="No scenario run yet" description="Adjust demand and lead time, then run the scenario." />
+      )}
+
       {result && (
         <>
-          <h3 style={{ marginTop: "1.25rem", fontSize: "1rem" }}>Before vs after</h3>
-          <div style={{ marginTop: "0.5rem", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: "0.75rem" }}>
-            <MetricCard label="Before — order qty" value={result.before.recommended_order_quantity} />
-            <MetricCard label="After — order qty" value={result.after.recommended_order_quantity} />
-            <MetricCard label="Before — effective lead (d)" value={result.before.explanation.lead_time_days_effective} />
-            <MetricCard label="After — effective lead (d)" value={result.after.explanation.lead_time_days_effective} />
-            <MetricCard label="After — demand multiplier" value={result.after.explanation.demand_multiplier ?? demandMult} />
+          <div className="compare-grid">
+            <div className="compare-col">
+              <h3>Current plan</h3>
+              <StatusBadge label="Baseline" tone="info" />
+              <div className="kpi-grid" style={{ marginTop: "0.75rem" }}>
+                <BusinessMetricCard label="Recommended order" value={beforeQty != null ? `${fmtUnits(beforeQty, 0)} units` : null} />
+                <BusinessMetricCard label="Effective lead time" value={beforeLead != null ? `${beforeLead} days` : null} />
+                <BusinessMetricCard
+                  label="Lead-time demand"
+                  value={beforeDemand != null ? fmtUnits(beforeDemand, 0) : null}
+                />
+              </div>
+            </div>
+            <div className="compare-col">
+              <h3>Simulated plan</h3>
+              <StatusBadge
+                label={Number(afterQty) > Number(beforeQty || 0) ? "Higher reorder" : "Scenario result"}
+                tone={Number(afterQty) > Number(beforeQty || 0) ? "warning" : "neutral"}
+              />
+              <div className="kpi-grid" style={{ marginTop: "0.75rem" }}>
+                <BusinessMetricCard label="Recommended order" value={afterQty != null ? `${fmtUnits(afterQty, 0)} units` : null} />
+                <BusinessMetricCard label="Effective lead time" value={afterLead != null ? `${afterLead} days` : null} />
+                <BusinessMetricCard
+                  label="Lead-time demand"
+                  value={afterDemand != null ? fmtUnits(afterDemand, 0) : null}
+                />
+              </div>
+            </div>
           </div>
-          <h3 style={{ marginTop: "1rem" }}>Decision explanation diff</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-            <JSONViewer data={result.before.explanation} />
-            <JSONViewer data={result.after.explanation} />
+
+          <div className="card" style={{ marginTop: "1rem" }}>
+            <h3 className="card-title">Why did the recommendation change?</h3>
+            <p style={{ margin: 0, lineHeight: 1.55 }}>{why}</p>
+            <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.88rem" }}>
+              Demand multiplier {displayOrDash(before?.explanation?.demand_multiplier)} →{" "}
+              {displayOrDash(after?.explanation?.demand_multiplier)} · Lead time{" "}
+              {displayOrDash(beforeLead)} → {displayOrDash(afterLead)} days · Order{" "}
+              {displayOrDash(fmtUnits(beforeQty, 0))} → {displayOrDash(fmtUnits(afterQty, 0))} units
+            </p>
           </div>
+
+          <details className="expandable section">
+            <summary>Technical details</summary>
+            <JSONViewer data={result} />
+          </details>
         </>
       )}
     </div>
   );
 }
-
-const inputStyle = {
-  background: "#0d1117",
-  border: "1px solid #30363d",
-  color: "#e6edf3",
-  borderRadius: 6,
-  padding: "0.5rem",
-};
-const btnStyle = {
-  background: "#238636",
-  border: "1px solid #2ea043",
-  color: "white",
-  borderRadius: 6,
-  padding: "0.5rem 0.8rem",
-  cursor: "pointer",
-};

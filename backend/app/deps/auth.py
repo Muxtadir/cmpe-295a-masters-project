@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_token_sub
@@ -13,10 +13,6 @@ from app.models.enums import UserRole
 from app.models.user import User
 
 http_bearer = HTTPBearer(auto_error=False)
-
-
-def _jwt_subject_email_norm(sub: str) -> str:
-    return str(sub).strip().lower()
 
 
 def normalize_role(raw: str | None) -> UserRole:
@@ -40,8 +36,7 @@ def get_optional_user(
     sub = decode_token_sub(creds.credentials)
     if not sub:
         return None
-    email_norm = _jwt_subject_email_norm(sub)
-    return db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
+    return db.execute(select(User).where(User.email == sub)).scalar_one_or_none()
 
 
 def get_current_user(
@@ -61,8 +56,7 @@ def get_current_user(
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    email_norm = _jwt_subject_email_norm(sub)
-    user = db.execute(select(User).where(func.lower(User.email) == email_norm)).scalar_one_or_none()
+    user = db.execute(select(User).where(User.email == sub)).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     if not user.is_active:

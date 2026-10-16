@@ -10,6 +10,7 @@ from app.agents.inventory_agent import InventoryAgent
 from app.database import get_db
 from app.deps.auth import require_store_manager_or_admin
 from app.services.forecast_queries import select_latest_forecast_result
+from app.services.inventory_defaults import ensure_inventory_record, minimal_inventory_record
 from app.models.inventory_record import InventoryRecord
 from app.models.user import User
 from app.schemas.inventory import InventoryRecommendationResponse
@@ -29,17 +30,25 @@ def _run_recommendation(
     user_id: int | None,
     triggered_by_role: str | None,
 ) -> InventoryRecommendationResponse:
-    stmt = select(InventoryRecord).where(InventoryRecord.sku == sku)
-    if store_id is not None:
-        stmt = stmt.where(InventoryRecord.store_id == store_id)
-    else:
-        stmt = stmt.where(InventoryRecord.store_id.is_(None))
+    # Online Retail II: store_id always NULL.
+    store_id = None
+    stmt = select(InventoryRecord).where(
+        InventoryRecord.sku == sku,
+        InventoryRecord.store_id.is_(None),
+    )
     record = db.execute(stmt).scalar_one_or_none()
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory record not found for sku/store.",
-        )
+        try:
+            record = ensure_inventory_record(db, sku, store_id)
+        except Exception:
+            db.rollback()
+            try:
+                record = minimal_inventory_record(db, sku, store_id)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Inventory record not found for StockCode.",
+                ) from e
 
     fr = db.execute(select_latest_forecast_result(sku, store_id)).scalar_one_or_none()
     forecast_result_id = fr.id if fr is not None else None

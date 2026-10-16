@@ -2,7 +2,7 @@ import logging
 import math
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.agents.demand_forecast_agent import DemandForecastAgent
@@ -50,24 +50,16 @@ def _prediction_dicts_to_points(raw: list[dict]) -> list[ForecastPoint]:
 
 @router.get("/forecast/{sku}", response_model=ForecastResponse)
 def get_forecast(
-    sku: Annotated[
-        str,
-        Path(
-            max_length=128,
-            description="Kaggle item_nbr as string (SKU-level key; not product family).",
-        ),
-    ],
+    sku: str,
     current: Annotated[User, Depends(require_store_manager_or_admin)],
     db: Session = Depends(get_db),
     horizon_days: int | None = Query(default=None, ge=1, le=365),
     model: str | None = Query(default=None),
-    store_id: Annotated[
-        str | None,
-        Query(
-            max_length=64,
-            description="Kaggle store_nbr as string. Forecast uses daily sales for this store × SKU only.",
-        ),
-    ] = None,
+    store_id: str | None = Query(default=None, max_length=64),
+    association_aware: bool = Query(
+        default=False,
+        description="If true, Prophet may use associated-SKU demand as extra regressors (falls back to baseline if none).",
+    ),
 ) -> ForecastResponse:
     settings = get_settings()
     h = horizon_days if horizon_days is not None else settings.default_forecast_horizon_days
@@ -78,6 +70,9 @@ def get_forecast(
         )
     m = model or settings.default_forecast_model
 
+    # Online Retail II: single retailer — ignore/omit fabricated store ids.
+    store_id = None
+
     agent = DemandForecastAgent(db)
     try:
         row, _ = agent.run(
@@ -87,6 +82,7 @@ def get_forecast(
             store_id=store_id,
             user_id=current.id,
             triggered_by_role=current.role,
+            association_aware=association_aware,
         )
     except ValueError as e:
         db.rollback()

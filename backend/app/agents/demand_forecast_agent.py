@@ -26,7 +26,7 @@ MIN_PROPHET_HISTORY_DAYS = 30
 
 
 class DemandForecastAgent:
-    """Demand forecasting at daily **store × SKU** grain (Kaggle ``store_nbr`` → ``store_id``, ``item_nbr`` → ``sku``)."""
+    """Structured agent entrypoint for demand forecasting (Prophet / LSTM)."""
 
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -86,6 +86,54 @@ class DemandForecastAgent:
         out["is_holiday"] = out["is_holiday"].fillna(0).astype(int).clip(0, 1)
         return out
 
+    def _attach_association_regressors(
+        self,
+        daily: pd.DataFrame,
+        *,
+        sku: str,
+        store_id: str | None,
+        max_related: int = 3,
+    ) -> tuple[pd.DataFrame, list[dict[str, Any]], list[str]]:
+        """
+        Join top related SKUs' historical daily demand as Prophet regressors.
+
+        Association strength (lift/confidence) is used only for *selecting* which
+        related SKUs to include — never as a multiplicative forecast scaler.
+        """
+        from app.agents.customer_agent import CustomerAgent
+
+        related = CustomerAgent(self._db).get_related_products(
+            sku, store_id=store_id, min_confidence=0.2, min_lift=1.0, limit=max_related
+        )
+        if not related:
+            return daily, [], []
+
+        out = daily.copy()
+        out["ds"] = pd.to_datetime(out["ds"]).dt.normalize()
+        meta: list[dict[str, Any]] = []
+        cols: list[str] = []
+        for i, rel in enumerate(related):
+            col = f"assoc_demand_{i}"
+            rel_df = self.build_daily_series(rel.sku, store_id)
+            if rel_df.empty:
+                continue
+            rel_df = rel_df[["ds", "y"]].copy()
+            rel_df["ds"] = pd.to_datetime(rel_df["ds"]).dt.normalize()
+            rel_df = rel_df.rename(columns={"y": col})
+            out = out.merge(rel_df, on="ds", how="left")
+            out[col] = out[col].fillna(0.0).astype(float)
+            cols.append(col)
+            meta.append(
+                {
+                    "sku": rel.sku,
+                    "support": rel.support,
+                    "confidence": rel.confidence,
+                    "lift": rel.lift,
+                    "regressor": col,
+                }
+            )
+        return out, meta, cols
+
     def run(
         self,
         *,
@@ -95,9 +143,12 @@ class DemandForecastAgent:
         store_id: str | None = None,
         user_id: int | None = None,
         triggered_by_role: str | None = None,
+        association_aware: bool = False,
     ) -> tuple[ForecastResult, dict[str, Any]]:
         daily = self.build_daily_series(sku, store_id)
         decision_logger = DecisionLogger(self._db)
+        related_meta: list[dict[str, Any]] = []
+        assoc_cols: list[str] = []
 
         input_payload: dict[str, Any] = {
             "sku": sku,
@@ -105,6 +156,7 @@ class DemandForecastAgent:
             "horizon_days": horizon_days,
             "model": model,
             "history_rows": int(len(daily)),
+            "association_aware": bool(association_aware),
         }
 
         if daily.empty:
@@ -134,13 +186,38 @@ class DemandForecastAgent:
             )
             raise ValueError(msg)
 
+        if association_aware and model == "prophet":
+            daily, related_meta, assoc_cols = self._attach_association_regressors(
+                daily, sku=sku, store_id=store_id
+            )
+            if not related_meta:
+                logger.info(
+                    "DemandForecastAgent association_aware requested but no related SKUs; "
+                    "falling back to baseline time-series for sku=%s",
+                    sku,
+                )
+                association_aware = False
+
         t_fit = time.perf_counter()
         future_reg = None
         if model == "prophet":
             last_ts = pd.to_datetime(daily["ds"].max())
             future_reg = self._future_holiday_frame(last_ts, horizon_days)
-            out = self._prophet.fit_predict(daily, horizon_days, future_regressors=future_reg)
+            if assoc_cols:
+                # Horizon values = trailing mean of each associated demand series (documented fallback).
+                for col in assoc_cols:
+                    mean_v = float(daily[col].tail(min(7, len(daily))).mean()) if col in daily.columns else 0.0
+                    future_reg[col] = mean_v
+            out = self._prophet.fit_predict(
+                daily,
+                horizon_days,
+                future_regressors=future_reg,
+                extra_regressor_cols=assoc_cols or None,
+            )
         elif model == "lstm":
+            # LSTM baseline unchanged; association features reserved for future multi-variate extension.
+            if association_aware:
+                logger.info("association_aware ignored for LSTM in this release; using baseline LSTM")
             out = self._lstm.fit_predict(daily[["ds", "y"]], horizon_days)
         else:
             raise ValueError(f"Unsupported model: {model}")
@@ -148,6 +225,8 @@ class DemandForecastAgent:
 
         metrics = dict(out.metrics or {})
         metrics["post_processed"] = True
+        metrics["forecast_method"] = "association_aware" if (association_aware and related_meta) else "time_series_only"
+        metrics["related_skus_used"] = related_meta
         if metrics.get("exogenous_columns") is None:
             metrics["exogenous_columns"] = []
         if model == "prophet":
@@ -156,9 +235,10 @@ class DemandForecastAgent:
             if hr_used and "is_holiday" not in metrics["exogenous_columns"]:
                 metrics["exogenous_columns"].append("is_holiday")
             logger.info(
-                "DemandForecastAgent Prophet holiday regressor used=%s calendar_rows=%s",
+                "DemandForecastAgent Prophet holiday regressor used=%s calendar_rows=%s assoc=%s",
                 hr_used,
                 len(future_reg) if future_reg is not None else 0,
+                bool(related_meta),
             )
 
         row = ForecastResult(

@@ -54,11 +54,15 @@ def list_sales(
     store_id: str | None = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
 ) -> SalesListResponse:
+    # Online Retail II can exceed 100k daily rows — cap list response for UI.
     stmt = select(SalesHistory).order_by(SalesHistory.sale_date.desc())
     if sku:
         stmt = stmt.where(SalesHistory.sku == sku)
     if store_id:
         stmt = stmt.where(SalesHistory.store_id == store_id)
+    else:
+        stmt = stmt.where(SalesHistory.store_id.is_(None))
+    stmt = stmt.limit(500)
     rows = db.execute(stmt).scalars().all()
 
     agg_stmt = select(
@@ -69,6 +73,8 @@ def list_sales(
         agg_stmt = agg_stmt.where(SalesHistory.sku == sku)
     if store_id:
         agg_stmt = agg_stmt.where(SalesHistory.store_id == store_id)
+    else:
+        agg_stmt = agg_stmt.where(SalesHistory.store_id.is_(None))
     agg_stmt = agg_stmt.group_by(SalesHistory.sale_date).order_by(SalesHistory.sale_date.asc())
     agg_rows = db.execute(agg_stmt).all()
 
